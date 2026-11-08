@@ -30,6 +30,8 @@ export async function saveEpisodeOutline(projectId:string,episodeId:string,
     throw Error('Invalid episode outline metadata')
   return withDraftLock(path(projectId,episodeId),async()=>{
     const snapshot=await store.read(projectId)
+    if(snapshot.series?.episodes.some(e=>e.id===episodeId&&e.status==='completed'))
+      throw Error('Completed episode outlines are immutable')
     const file=path(projectId,episodeId)
     const existing=await readEpisodeDrafts(projectId,episodeId)
     if(existing && (existing.storyGoal!==storyGoal||existing.storyBible!==storyBible||
