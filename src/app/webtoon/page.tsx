@@ -457,6 +457,81 @@ export default function WebtoonStudio(){
         {snapshot&&<p className="text-sm text-stone-500">리비전 {snapshot.revision} · 캐릭터 {snapshot.catalog.characters.length}명 · 장소 {snapshot.catalog.locations.length}개</p>}
       </section>
       {snapshot&&<section className="rounded-xl bg-white p-4 space-y-3">
+        <h2 className="font-bold text-xl">연재 화수 · 진행 상태 · 다음 화 연결</h2>
+        <p className="text-sm text-stone-600">완료된 화는 잠그고, 마지막 승인 상태와 미회수 복선을 다음 화에 자동으로 전달해.</p>
+        {snapshot.series?.episodes.length?(
+          <div className="flex flex-wrap gap-2">
+            {snapshot.series.episodes.map(ep=><button key={ep.id}
+              onClick={()=>{setEpisodeId(ep.id);setRemainingDrafts(null);setEpisodeOutline(ep.outline||null)}}
+              className={'px-3 py-2 rounded border text-sm '+(episodeId===ep.id?'bg-stone-900 text-white':'bg-white')}>
+              {ep.ordinal}화 · {ep.status==='completed'?'완료':'제작 중'} · {ep.pairIds.length}/{ep.targetPairs}쌍
+            </button>)}
+            <button className="px-3 py-2 rounded border text-sm"
+              onClick={()=>{setEpisodeId(nextEpisodeId(snapshot.series!));setRemainingDrafts(null);setEpisodeOutline(null)}}>
+              다음 화 ID 준비
+            </button>
+          </div>
+        ):<div className="text-sm text-stone-600">
+          {snapshot.pairs.length?<>이전 버전의 컷들이 있어. 모든 컷이 승인됐다면
+            <button className="underline mx-1" onClick={()=>void run('migrateLegacyEpisodes')}>
+              기존 작품의 회차 데이터 변환
+            </button>을 먼저 실행해.</>:'아직 시작된 화가 없어. 아래에서 첫 화를 설계해.'}
+        </div>}
+        <div className="flex flex-wrap items-center gap-4 text-sm">
+          <strong>현재 선택: {episodeId}</strong>
+          <label className="flex items-center gap-2"><input type="checkbox" checked={autoContinue}
+            onChange={e=>setAutoContinue(e.target.checked)}/>
+            2컷 승인 시 다음 단계 자동 진행 (검수·승인은 수동)
+          </label>
+        </div>
+        {activeEpisode&&activeEpisode.id!==episodeId&&
+          <p className="text-sm text-amber-700">현재 {activeEpisode.id} 제작 중. 완료 확정 후 다음 화 제작 가능.</p>}
+        {selectedEpisode&&<div className="border rounded p-3 space-y-2">
+          <p className="text-sm">화수 {selectedEpisode.ordinal} ·
+            {selectedEpisode.status==='completed'?' 확정 완료':' 진행 중'} ·
+            {selectedEpisode.pairIds.length*2}/{selectedEpisode.targetPairs*2}컷 계획 등록
+          </p>
+          {selectedEpisode.handoff&&<div className="text-sm space-y-1">
+            <p><strong>이번 화 요약:</strong> {selectedEpisode.handoff.summary}</p>
+            <p><strong>마지막 후킹:</strong> {selectedEpisode.handoff.endingHook}</p>
+            <p><strong>다음 화 시작 상태:</strong> {selectedEpisode.handoff.finalState.locationId} ·
+              {selectedEpisode.handoff.finalState.timeKey}</p>
+          </div>}
+          {selectedEpisode.status==='producing'&&<>
+            <p className="text-xs text-stone-600">확정 조건: 모든 2컷 쌍 등록 + 각 컷 승인 + 복선·후킹 인계 내용 작성.</p>
+            <p className={episodeReady?.ready?'text-green-800 text-sm':'text-amber-700 text-sm'}>
+              {episodeReady?.ready?'모든 컷 승인 완료 — 화수 마감 가능':'마감 대기: '+(episodeReady?.reason||'')}
+            </p>
+            {episodeReady?.ready&&<div className="space-y-2">
+              <textarea className="border rounded p-2 w-full" rows={3}
+                placeholder="이번 화의 사건·전개·변화 요약 (비워두면 승인된 콘티 요약 사용)"
+                value={finalSynopsis} onChange={e=>setFinalSynopsis(e.target.value)}/>
+              <input className="border rounded p-2 w-full" placeholder="마지막 후킹 / 다음 화 기대 사건"
+                value={finalHook} onChange={e=>setFinalHook(e.target.value)}/>
+              <textarea className="border rounded p-2 w-full" rows={2}
+                placeholder="이번 화에 새로 생긴 미해결 복선 — 줄마다 thread_id | 설명"
+                value={openThreadsText} onChange={e=>setOpenThreadsText(e.target.value)}/>
+              <textarea className="border rounded p-2 w-full" rows={2}
+                placeholder="이번 화에서 회수된 기존 복선 ID (쉼표 또는 줄바꿈으로 구분)"
+                value={resolveThreadsText} onChange={e=>setResolveThreadsText(e.target.value)}/>
+              <textarea className="border rounded p-2 w-full" rows={2}
+                placeholder="관계 변화 — 줄마다 캐릭터ID1,캐릭터ID2 | 변화 내용"
+                value={relationshipNotesText} onChange={e=>setRelationshipNotesText(e.target.value)}/>
+              <button className="bg-stone-900 text-white rounded px-4 py-2 disabled:opacity-40"
+                disabled={busy} onClick={()=>void finalizeCurrentEpisode()}>
+                {selectedEpisode.ordinal}화 완료 확정 → 다음 화 준비
+              </button>
+            </div>}
+          </>}
+        </div>}
+        {snapshot.series?.threads.some(t=>t.status==='open')&&<div className="text-sm space-y-1">
+          <strong>미회수 복선 목록</strong>
+          {snapshot.series.threads.filter(t=>t.status==='open').map(t=><p key={t.id}>
+            {t.id} · {t.description} (처음: {t.introducedEpisode})
+          </p>)}
+        </div>}
+      </section>
+      {snapshot&&<section className="rounded-xl bg-white p-4 space-y-3">
         <h2 className="font-bold text-xl">2. 스토리에서 주요 인물·장소 초안 제안</h2>
         <p className="text-sm text-stone-600">LLM이 캐릭터 외형과 주요 장소를 제안해. 아래 제안은 아직 기준 이미지가 아니며, 이미지를 생성·확인·승인해야 고정 원본이 돼.</p>
         <button className="border rounded px-3 py-2 disabled:opacity-40" disabled={busy||!storyGoal.trim()}
