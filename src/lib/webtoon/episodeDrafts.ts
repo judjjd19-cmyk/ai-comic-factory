@@ -12,7 +12,7 @@ const root=()=>resolve(process.env.WEBTOON_DATA_DIR||join(process.cwd(),'webtoon
 const path=(projectId:string,episodeId:string)=>join(root(),id(projectId),'drafts',id(episodeId)+'.json')
 export interface EpisodeDrafts {
   projectId:string;episodeId:string;catalogHash:string;storyGoal:string;storyBible:string
-  cursor:number;plans:PairPlan[];updatedAt:string
+  cursor:number;startIndex:number;plans:PairPlan[];updatedAt:string
 }
 async function save(file:string,record:EpisodeDrafts){
   await mkdir(dirname(file),{recursive:true})
@@ -48,13 +48,13 @@ export async function generateEpisodeDrafts(input:{projectId:string;episodeId:st
     if(draft.catalogHash!==catalogHash||draft.storyGoal!==storyGoal||draft.storyBible!==storyBible||
        draft.plans.length>input.pairCount)throw Error('Existing draft conflicts with requested episode')
   }else{
-    draft={projectId,episodeId,catalogHash,storyGoal,storyBible,cursor:0,plans:[],updatedAt:new Date().toISOString()}
+    draft={projectId,episodeId,catalogHash,storyGoal,storyBible,cursor:0,startIndex:snapshot.pairs.length,plans:[],updatedAt:new Date().toISOString()}
     await save(file,draft)
   }
   for(let i=draft.plans.length;i<input.pairCount;i++){
     const last=draft.plans.at(-1)||snapshot.pairs.at(-1)?.plan
     const before=last?.after||initialScene(snapshot.catalog,input.locationId)
-    const pairId='pair'+String(snapshot.pairs.length+i+1).padStart(5,'0')
+    const pairId='pair'+String(draft.startIndex+i+1).padStart(5,'0')
     const plannerInput:PairPlannerInput={pairId,episodeId,storyGoal,storyBibleSummary:storyBible,
       approvedHistorySummary:draft.plans.slice(-6).map(p=>p.panels.map(q=>q.summary).join(' / ')).join('\n'),
       before,catalog:snapshot.catalog}

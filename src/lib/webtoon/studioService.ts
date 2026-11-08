@@ -9,6 +9,7 @@ import {generatePairPlan} from './pairPlanner'
 import {predict} from '@/app/queries/predict'
 import {renderQueuedPanel} from '@/app/engine/renderQueuedPanel'
 import {pollComfyUI,submitComfyUI} from '@/app/engine/comfyui'
+import {generateEpisodeDrafts,activateNextEpisodeDraft,readEpisodeDrafts} from './episodeDrafts'
 
 const store=new ProjectStore()
 const safeId=(x:string):string=>{
@@ -137,3 +138,18 @@ export async function editWebtoonBubble(projectId:string,panelId:string,bubbleId
   return store.setBubble(projectId,snapshot.revision,panelId,bubbleId,text,box)
 }
 export async function webtoonAsset(projectId:string,assetId:string){return store.readAsset(projectId,assetId)}
+
+export async function planEntireWebtoonEpisode(projectId:string,episodeId:string,storyGoal:string,storyBible:string,
+  pairCount:number,locationId?:string){
+  return generateEpisodeDrafts({projectId,episodeId,storyGoal,storyBible,pairCount,locationId},
+    ({systemPrompt,userPrompt,maxNewTokens})=>predict({
+      systemPrompt,userPrompt,nbMaxNewTokens:maxNewTokens,
+      llmVendorConfig:{vendor:'SERVER',apiKey:'',modelId:''}
+    }),store)
+}
+export async function nextPlannedWebtoonPair(projectId:string,episodeId:string){
+  return activateNextEpisodeDraft(projectId,episodeId,store)
+}
+export async function savedWebtoonEpisodeDrafts(projectId:string,episodeId:string){
+  return readEpisodeDrafts(projectId,episodeId)
+}

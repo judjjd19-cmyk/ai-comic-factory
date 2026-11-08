@@ -49,6 +49,8 @@ export default function WebtoonStudio(){
   const [masterPromptId,setMasterPromptId]=useState('')
   const [storyGoal,setStoryGoal]=useState('두 주인공이 오래된 비밀을 발견하는 미스터리 웹툰')
   const [episodeId,setEpisodeId]=useState('episode1')
+  const [episodePairs,setEpisodePairs]=useState(10)
+  const [remainingDrafts,setRemainingDrafts]=useState<number|null>(null)
   const [storyBible,setStoryBible]=useState('')
   const [reviewCheck,setReviewCheck]=useState(false)
   const stripRef=useRef<HTMLDivElement>(null)
@@ -107,6 +109,18 @@ export default function WebtoonStudio(){
     if(!snapshot)return
     await run('planPair',{storyGoal,episodeId,storyBibleSummary:storyBible,
       locationId:snapshot.catalog.locations[0]?.id})
+  }
+  const planEpisode=async()=>{
+    if(!snapshot)return
+    await run('planEpisode',{storyGoal,episodeId,storyBibleSummary:storyBible,
+      pairCount:episodePairs,locationId:snapshot.catalog.locations[0]?.id},
+      data=>setRemainingDrafts(data.plans.length-data.cursor))
+  }
+  const activateDraft=async()=>{
+    await run('activateDraft',{episodeId},data=>{
+      if(data.snapshot)setSnapshot(data.snapshot)
+      setRemainingDrafts(data.remaining)
+    })
   }
   const startRender=async(pairId:string,index:0|1)=>{
     await run('startPanel',{pairId,panelIndex:index})
@@ -242,8 +256,21 @@ export default function WebtoonStudio(){
         <input className="border rounded p-2 w-full" placeholder="회차 ID" value={episodeId} onChange={e=>setEpisodeId(e.target.value)}/>
         <textarea className="border rounded p-2 w-full" rows={3} value={storyGoal} onChange={e=>setStoryGoal(e.target.value)} placeholder="이번 두 컷의 사건·목표"/>
         <textarea className="border rounded p-2 w-full" rows={2} value={storyBible} onChange={e=>setStoryBible(e.target.value)} placeholder="세계관·인물 관계·주요 복선"/>
-        <button className="rounded bg-stone-900 text-white px-4 py-2 disabled:opacity-40" disabled={busy||(lastPair&&lastPair.job.status!=='approved')}
-          onClick={()=>void planPair()}>다음 2컷 콘티 생성</button>
+        <div className="flex gap-3 items-center flex-wrap">
+          <label className="text-sm">회차 2컷 쌍 수
+            <input type="number" min={1} max={50} value={episodePairs}
+              onChange={e=>setEpisodePairs(Math.max(1,Math.min(50,Number(e.target.value)||1)))}
+              className="ml-2 border rounded p-2 w-20"/>
+          </label>
+          <button className="rounded border px-4 py-2 disabled:opacity-40" disabled={busy}
+            onClick={()=>void planEpisode()}>LLM 단계: 회차 전체 2컷씩 사전 기획</button>
+          <button className="rounded bg-stone-900 text-white px-4 py-2 disabled:opacity-40"
+            disabled={busy||(lastPair&&lastPair.job.status!=='approved')}
+            onClick={()=>void activateDraft()}>이미지 단계: 저장된 다음 2컷 불러오기</button>
+          <button className="rounded border px-4 py-2 disabled={busy||(lastPair&&lastPair.job.status!=='approved')}
+            onClick={()=>void planPair()}>즉석 다음 2컷 계획</button>
+        </div>
+        {remainingDrafts!==null&&<p className="text-sm">아직 활성화되지 않은 사전 콘티: {remainingDrafts}쌍</p>
         {lastPair&&<div className="border rounded p-3 text-sm">
           <strong>{lastPair.plan.id} · {lastPair.job.status}</strong>
           {lastPair.plan.panels.map((panel,i)=><p key={i}>{i+1}컷: {panel.summary} — {panel.characters.map(a=>a.action).join(', ')}</p>)}

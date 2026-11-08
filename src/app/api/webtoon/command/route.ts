@@ -3,6 +3,7 @@ import {
   approveWebtoonCharacter,approveWebtoonLocation,approveWebtoonSupplement,
   generateMasterImage,pollMasterImage,planWebtoonPair,startWebtoonPanel,
   pollWebtoonPanel,approveWebtoonPanel,editWebtoonBubble,
+  planEntireWebtoonEpisode,nextPlannedWebtoonPair,savedWebtoonEpisodeDrafts,
 } from '@/lib/webtoon/studioService'
 
 export const runtime='nodejs'
@@ -61,6 +62,14 @@ export async function POST(request:Request){
         data=await generateMasterImage(str(body.prompt),number(body.width)||768,number(body.height)||1024);break
       case 'pollMaster':
         data=await pollMasterImage(str(body.promptId));break
+      case 'planEpisode':
+        data=await planEntireWebtoonEpisode(projectId,str(body.episodeId)||'episode1',
+          str(body.storyGoal),str(body.storyBibleSummary),number(body.pairCount),
+          str(body.locationId)||undefined);break
+      case 'activateDraft':
+        data=await nextPlannedWebtoonPair(projectId,str(body.episodeId)||'episode1');break
+      case 'draftStatus':
+        data=await savedWebtoonEpisodeDrafts(projectId,str(body.episodeId)||'episode1');break
       case 'planPair':
         data=await planWebtoonPair(projectId,str(body.storyGoal),str(body.episodeId)||'episode1',
           str(body.locationId)||undefined,str(body.storyBibleSummary));break
