@@ -1,8 +1,15 @@
 stages:
+  - test
   - import
 
-# One-time migration of the original Git history into a separate branch.
-# Enable CI/CD > Job token permissions > Allow Git push requests first.
+# Does not require npm ci: the webtoon contract tests use only Node built-ins.
+webtoon_contract_tests:
+  stage: test
+  image: node:22-alpine
+  script:
+    - npm run test:webtoon
+
+# Optional one-time upstream Git history import; never overwrites main.
 import_upstream:
   stage: import
   image: alpine:3.20
@@ -11,4 +18,4 @@ import_upstream:
   script:
     - sh scripts/import-upstream.sh
   when: manual
-  allow_failure: false
+  allow_failure: true
