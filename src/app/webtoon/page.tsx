@@ -36,7 +36,7 @@ function BubblePositionEditor({bubble,initialBox,onSave}:{
   onSave:(box:[number,number,number,number])=>void
 }){
   const [box,setBox]=useState<[number,number,number,number]>(initialBox)
-  useEffect(()=>{setBox(initialBox)},[...initialBox])
+  useEffect(()=>{setBox(initialBox)},[initialBox[0],initialBox[1],initialBox[2],initialBox[3]])
   const labels=['x','y','width','height'] as const
   return <div className="border rounded p-2 text-xs space-y-2">
     <strong>말풍선 {bubble.id} · {bubble.speakerId||'나레이션'}</strong>
