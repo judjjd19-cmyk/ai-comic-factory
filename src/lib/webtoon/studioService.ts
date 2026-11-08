@@ -13,7 +13,7 @@ import {randomUUID} from 'node:crypto'
 import {ProjectStore, type ProjectSnapshot} from './projectStore'
 import type {PairPlan} from './contracts'
 import {generatePairPlan} from './pairPlanner'
-import {predict} from '@/app/queries/predict'
+import {predictWebtoonLocal} from './localStoryInference'
 import {renderQueuedPanel} from '@/app/engine/renderQueuedPanel'
 import {pollComfyUI,submitComfyUI} from '@/app/engine/comfyui'
 import {generateEpisodeDrafts,activateNextEpisodeDraft,readEpisodeDrafts,initialScene,
@@ -201,10 +201,7 @@ export async function planWebtoonPair(projectId:string,storyGoal:string,episodeI
           snapshot.bubbleOverrides?.[x.id]?.[b.id]?.text??b.text).join(' ')).join(' / ')).join('\n')).slice(0,10000),
     before:last?.plan.after||initial,catalog:snapshot.catalog
   }
-  const plan:PairPlan=await generatePairPlan(input,({systemPrompt,userPrompt,maxNewTokens})=>predict({
-    systemPrompt,userPrompt,nbMaxNewTokens:maxNewTokens,
-    llmVendorConfig:{vendor:'SERVER',apiKey:'',modelId:''}
-  }))
+  const plan:PairPlan=await generatePairPlan(input,({systemPrompt,userPrompt,maxNewTokens})=>predictWebtoonLocal({systemPrompt,userPrompt,maxNewTokens}))
   // Beginning the episode and appending its first pair must commit in ONE manifest revision.
   // A failed append cannot leave an empty active episode that blocks future work.
   return store.appendPair(projectId,snapshot.revision,plan,
@@ -370,10 +367,7 @@ export async function webtoonAsset(projectId:string,assetId:string){return store
 export async function planEntireWebtoonEpisode(projectId:string,episodeId:string,storyGoal:string,storyBible:string,
   pairCount:number,locationId?:string){
   return generateEpisodeDrafts({projectId,episodeId,storyGoal,storyBible,pairCount,locationId},
-    ({systemPrompt,userPrompt,maxNewTokens})=>predict({
-      systemPrompt,userPrompt,nbMaxNewTokens:maxNewTokens,
-      llmVendorConfig:{vendor:'SERVER',apiKey:'',modelId:''}
-    }),store)
+    ({systemPrompt,userPrompt,maxNewTokens})=>predictWebtoonLocal({systemPrompt,userPrompt,maxNewTokens}),store)
 }
 export async function nextPlannedWebtoonPair(projectId:string,episodeId:string){
   return activateNextEpisodeDraft(projectId,episodeId,store)
@@ -385,18 +379,12 @@ export async function savedWebtoonEpisodeDrafts(projectId:string,episodeId:strin
 export async function planOneWebtoonPairStep(projectId:string,episodeId:string,storyGoal:string,storyBible:string,
   pairCount:number,locationId?:string){
   return generateEpisodeDrafts({projectId,episodeId,storyGoal,storyBible,pairCount,locationId,maxNewPairs:1},
-    ({systemPrompt,userPrompt,maxNewTokens})=>predict({
-      systemPrompt,userPrompt,nbMaxNewTokens:maxNewTokens,
-      llmVendorConfig:{vendor:'SERVER',apiKey:'',modelId:''}
-    }),store)
+    ({systemPrompt,userPrompt,maxNewTokens})=>predictWebtoonLocal({systemPrompt,userPrompt,maxNewTokens}),store)
 }
 
 /** LLM casting proposal only; no character/location is registered without an approved image. */
 export async function suggestWebtoonCast(projectId:string,story:string,bible:string){
-  const suggestions=await proposeCast(story,bible,({systemPrompt,userPrompt,maxNewTokens})=>predict({
-    systemPrompt,userPrompt,nbMaxNewTokens:maxNewTokens,
-    llmVendorConfig:{vendor:'SERVER',apiKey:'',modelId:''}
-  }))
+  const suggestions=await proposeCast(story,bible,({systemPrompt,userPrompt,maxNewTokens})=>predictWebtoonLocal({systemPrompt,userPrompt,maxNewTokens}))
   const snapshot=await store.read(projectId)
   // Suggestions are unapproved metadata, never canonical image masters.
   return store.saveCasting(projectId,snapshot.revision,suggestions)
@@ -412,10 +400,7 @@ export async function createWebtoonEpisodeOutline(projectId:string,episodeId:str
   const carryover=seriesNarrativeContext(snapshot.series)
   const outline=await designEpisodeOutline(episodeId,premise,
     (bible+'\nCANONICAL_PREVIOUS_EPISODE_MEMORY: '+carryover).slice(0,15000),snapshot.catalog,
-    ({systemPrompt,userPrompt,maxNewTokens})=>predict({
-      systemPrompt,userPrompt,nbMaxNewTokens:maxNewTokens,
-      llmVendorConfig:{vendor:'SERVER',apiKey:'',modelId:''}
-    }))
+    ({systemPrompt,userPrompt,maxNewTokens})=>predictWebtoonLocal({systemPrompt,userPrompt,maxNewTokens}))
   return saveEpisodeOutline(projectId,episodeId,premise,bible,outline,store)
 }
 
