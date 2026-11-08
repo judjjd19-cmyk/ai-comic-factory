@@ -52,11 +52,32 @@ async function withRenderTaskLock<T>(projectId:string,pairId:string,panelIndex:0
   const folder=join(root(),safeId(projectId),'tasks')
   await mkdir(folder,{recursive:true})
   const lock=join(folder,safeId(pairId)+'_'+panelIndex+'.lock')
-  try{await mkdir(lock)}catch(e){
-    if((e as NodeJS.ErrnoException).code==='EEXIST')
-      throw new Error('A render submission for this panel is already in progress')
-    throw e
+  let acquired=false
+  for(let attempt=0;attempt<3&&!acquired;attempt++){
+    try{
+      await mkdir(lock)
+      acquired=true
+      await writeFile(join(lock,'owner.json'),JSON.stringify({pid:process.pid,at:Date.now()}),{flag:'wx'})
+    }catch(e){
+      if(acquired){await rm(lock,{recursive:true,force:true});throw e}
+      if((e as NodeJS.ErrnoException).code!=='EEXIST')throw e
+      const info=await stat(lock).catch(()=>null)
+      if(!info)continue
+      let pid=0
+      try{pid=Number(JSON.parse(await readFile(join(lock,'owner.json'),'utf8')).pid)}catch{}
+      let alive=false
+      if(Number.isInteger(pid)&&pid>1){
+        try{process.kill(pid,0);alive=true}
+        catch(error){alive=(error as NodeJS.ErrnoException).code==='EPERM'}
+      }
+      if(alive||Date.now()-info.mtimeMs<15_000)
+        throw new Error('A render submission for this panel is already in progress')
+      const stale=lock+'.abandoned-'+randomUUID()
+      try{await rename(lock,stale);await rm(stale,{recursive:true,force:true})}
+      catch(error){if((error as NodeJS.ErrnoException).code!=='ENOENT')throw error}
+    }
   }
+  if(!acquired)throw new Error('Unable to acquire render task lock')
   try{return await fn()}
   finally{await rm(lock,{recursive:true,force:true})}
 }
