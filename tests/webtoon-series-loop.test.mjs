@@ -157,3 +157,20 @@ test('editing early dialogue after later pairs exist blocks finalization until d
  })
  assert.equal(state.series.episodes[0].status,'completed')
 }))
+
+test('long serial memory always retains open thread IDs in valid JSON',()=>{
+ const threads=Array.from({length:15},(_,i)=>({
+   id:'thread_'+i,description:'실마리 '+i+' '+('가'.repeat(500)),
+   introducedEpisode:'episode1',status:'open'
+ }))
+ const serialized=seriesNarrativeContext({
+   episodes:[{id:'episode1',status:'completed',handoff:{
+     summary:'이전 화 '+('사건'.repeat(500)),endingHook:'새 사건',lastDialogue:'기억해',finalState:{}
+   }}],
+   threads,relationships:[]
+ })
+ const parsed=JSON.parse(serialized)
+ assert.equal(parsed.unresolvedThreads.length,15)
+ assert.equal(parsed.unresolvedThreads[14].id,'thread_14')
+ assert(serialized.length<7301)
+})
