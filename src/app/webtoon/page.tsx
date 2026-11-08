@@ -675,8 +675,8 @@ export default function WebtoonStudio(){
         </div>
         <div className="flex gap-3 items-center flex-wrap">
           <label className="text-sm">회차 2컷 쌍 수
-            <input type="number" min={1} max={50} value={episodePairs}
-              onChange={e=>setEpisodePairs(Math.max(1,Math.min(50,Number(e.target.value)||1)))}
+            <input type="number" min={1} max={250} value={episodePairs}
+              onChange={e=>setEpisodePairs(Math.max(1,Math.min(250,Number(e.target.value)||1)))}
               className="ml-2 border rounded p-2 w-20"/>
           </label>
           <button className="rounded border px-4 py-2 disabled:opacity-40" disabled={busy}
