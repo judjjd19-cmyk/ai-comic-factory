@@ -222,7 +222,7 @@ export interface ApprovedPanel {
 
 export interface SelectedReference {
   assetId: string
-  purpose: 'identity' | 'outfit' | 'location' | 'continuity'
+  purpose: 'identity' | 'outfit' | 'view' | 'location' | 'continuity'
   characterId?: string
 }
 
@@ -259,6 +259,11 @@ export function selectReferences(
       a.status === 'approved' && a.uri && a.sha256 && a.version === catalog.characters.find(c => c.id === actor.characterId)?.version &&
       a.outfitId === actor.outfitId)
     add(outfit, 'outfit', actor.characterId)
+    // A view reference is useful for profile/back shots but never replaces the fixed identity anchor.
+    const view = catalog.assets.find(a => a.kind === 'view' && a.ownerId === actor.characterId &&
+      a.view === actor.facing && a.version === catalog.characters.find(c => c.id === actor.characterId)?.version &&
+      a.status === 'approved' && a.sha256)
+    add(view, 'view', actor.characterId)
   }
   const location = catalog.locations.find(l => l.id === panel.locationId)
   if (location) for (const id of location.referenceIds) {

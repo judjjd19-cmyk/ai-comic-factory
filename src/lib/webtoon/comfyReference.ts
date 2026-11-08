@@ -49,7 +49,7 @@ export async function readApprovedReference(projectDirectory: string, asset: Ref
 }
 
 export function bindingKey(ref: Pick<SelectedReference,'purpose'|'characterId'>): string {
-  return (ref.purpose==='identity'||ref.purpose==='outfit')
+  return (ref.purpose==='identity'||ref.purpose==='outfit'||ref.purpose==='view')
     ? ref.purpose+':'+(ref.characterId||'') : ref.purpose
 }
 

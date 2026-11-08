@@ -2,7 +2,7 @@
 
 import {useCallback,useEffect,useRef,useState} from 'react'
 import type {ProjectSnapshot} from '@/lib/webtoon/projectStore'
-import type {BubblePlan,PairRecord} from '@/lib/webtoon/contracts'
+import type {BubblePlan} from '@/lib/webtoon/contracts'
 
 type ProjectListItem={projectId:string;revision:number;characters:number;pairs:number}
 type ApiReply={ok:boolean;data?:any;error?:string}
@@ -78,7 +78,6 @@ export default function WebtoonStudio(){
     }catch(e){setMessage('오류: '+(e instanceof Error?e.message:String(e)))}
     finally{setBusy(false)}
   }
-  const newestDraft=snapshot?.catalog.assets.findLast(a=>a.id===draftId)
   const selectedMasterDraft=snapshot?.catalog.assets.find(a=>a.id===draftId)
   const lastPair=snapshot?.pairs.at(-1)
   const assetForPanel=(panelId:string)=>snapshot?.catalog.assets.filter(a=>
@@ -100,7 +99,7 @@ export default function WebtoonStudio(){
   }
   const approveMaster=async()=>{
     if(!snapshot||!selectedMasterDraft||!reviewCheck)return
-    const action=kind==='identity'?'approveCharacter':kind==='location'?'approveLocation':'approveSupplement'
+    const action=selectedMasterDraft.kind==='identity'?'approveCharacter':selectedMasterDraft.kind==='location'?'approveLocation':'approveSupplement'
     await run(action,{revision:snapshot.revision,assetId:draftId,ownerId,displayName,
       description,outfitId},()=>{setDraftId('');setGenerated('');setFile(null);setReviewCheck(false)})
   }
@@ -142,6 +141,11 @@ export default function WebtoonStudio(){
     const text=override?.text||bubble.text
     return <div key={bubble.id} className="absolute z-10 flex flex-col items-center justify-center rounded-[50%] bg-white border-2 border-stone-950 p-2 shadow-sm text-center text-stone-900"
       style={{...boxPct(box),fontSize:'clamp(10px,1.2vw,17px)'}}>
+      {bubble.tailTarget&&<svg className="absolute z-[-1] overflow-visible pointer-events-none" style={{
+        left:0,top:0,width:'100%',height:'100%'}} viewBox="0 0 100 100" preserveAspectRatio="none">
+        <path d={`M 48 85 L ${100*(bubble.tailTarget[0]-box[0])/box[2]} ${100*(bubble.tailTarget[1]-box[1])/box[3]} L 62 88 Z`}
+          stroke="#1c1917" strokeWidth="1" fill="white"/>
+      </svg>}
       <textarea key={text} defaultValue={text} aria-label={bubble.id+' 대사'} rows={2}
         onBlur={event=>{if(event.target.value!==text)void saveBubble(panelId,bubble,event.target.value,box)}}
         className="w-full h-full resize-none bg-transparent text-center leading-snug outline-none"/>
