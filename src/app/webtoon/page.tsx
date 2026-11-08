@@ -4,6 +4,8 @@ import {useCallback,useEffect,useRef,useState} from 'react'
 import type {ProjectSnapshot} from '@/lib/webtoon/projectStore'
 import type {BubblePlan} from '@/lib/webtoon/contracts'
 import type {CastProposals} from '@/lib/webtoon/castPlanner'
+import {episodeCompletionReady,draftEpisodeSummary} from '@/lib/webtoon/seriesNarrative'
+import {nextEpisodeId} from '@/lib/webtoon/seriesLoop'
 
 type ProjectListItem={projectId:string;revision:number;characters:number;pairs:number}
 type ApiReply={ok:boolean;data?:any;error?:string}
@@ -78,6 +80,12 @@ export default function WebtoonStudio(){
   const [storyGoal,setStoryGoal]=useState('두 주인공이 오래된 비밀을 발견하는 미스터리 웹툰')
   const [episodeId,setEpisodeId]=useState('episode1')
   const [episodePairs,setEpisodePairs]=useState(10)
+  const [autoContinue,setAutoContinue]=useState(false)
+  const [finalSynopsis,setFinalSynopsis]=useState('')
+  const [finalHook,setFinalHook]=useState('')
+  const [openThreadsText,setOpenThreadsText]=useState('')
+  const [resolveThreadsText,setResolveThreadsText]=useState('')
+  const [relationshipNotesText,setRelationshipNotesText]=useState('')
   const [remainingDrafts,setRemainingDrafts]=useState<number|null>(null)
   const [episodeOutline,setEpisodeOutline]=useState<any>(null)
   const [storyBible,setStoryBible]=useState('')
@@ -89,6 +97,7 @@ export default function WebtoonStudio(){
   const stripRef=useRef<HTMLDivElement>(null)
   const renderPollingRef=useRef(false)
   const masterPollingRef=useRef(false)
+  const autoActionRef=useRef('')
   const [pollFailed,setPollFailed]=useState(false)
   const cancelPlanningRef=useRef(false)
 
@@ -134,7 +143,13 @@ export default function WebtoonStudio(){
     finally{setBusy(false)}
   }
   const selectedMasterDraft=snapshot?.catalog.assets.find(a=>a.id===draftId)
-  const lastPair=snapshot?.pairs.at(-1)
+  const activeEpisode=snapshot?.series?.episodes.find(e=>e.status==='producing')
+  const selectedEpisode=snapshot?.series?.episodes.find(e=>e.id===episodeId)
+  const episodePairsInProject=snapshot?.pairs.filter(p=>p.plan.episodeId===episodeId)||[]
+  const currentPair=snapshot?.pairs.at(-1)
+  const lastPair=currentPair?.plan.episodeId===episodeId?currentPair:undefined
+  const episodeReady=snapshot&&selectedEpisode?episodeCompletionReady(selectedEpisode,
+    snapshot.pairs,new Set(snapshot.approvedPanels.map(p=>p.id))):null
   useEffect(()=>{
     if(!snapshot?.story)return
     const key=snapshot.projectId+':'+snapshot.story.version
