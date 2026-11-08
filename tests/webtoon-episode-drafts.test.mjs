@@ -32,7 +32,7 @@ test('episode planning persists two-panel drafts before any image approvals',()=
  const first=await activateNextEpisodeDraft('book','episode1',store)
  assert.equal(first.snapshot.pairs.length,1)
  assert.equal(first.remaining,2)
- await assert.rejects(activateNextEpisodeDraft('book','episode1',store),/approved first/)
+ await assert.rejects(activateNextEpisodeDraft('book','episode1',store),/approved images|approved first/)
 }))
 test('episode generation resumes consistently and rejects changed premises',()=>setup(async store=>{
  const opts={projectId:'book',episodeId:'episode1',storyGoal:'학교',storyBible:'',pairCount:2}
@@ -50,7 +50,7 @@ test('one-pair planning steps persist progress for Colab model switching',()=>se
  assert.equal(b.plans.length,2)
  const c=await generateEpisodeDrafts(options,llm,store)
  assert.equal(c.plans.length,3)
- assert.deepEqual(c.plans.map(p=>p.id),['pair00001','pair00002','pair00003'])
+ assert.deepEqual(c.plans.map(p=>p.id),['incremental_p00001','incremental_p00002','incremental_p00003'])
  const resumed=await generateEpisodeDrafts(options,llm,store)
  assert.equal(resumed.plans.length,3)
 }))
