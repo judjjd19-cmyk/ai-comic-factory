@@ -121,7 +121,8 @@ export async function generateEpisodeDrafts(input:{projectId:string;episodeId:st
   const step=input.maxNewPairs??Math.min(input.pairCount,50)
   if(!Number.isInteger(step)||step<1||step>50)throw Error('Invalid planning batch size')
   if(!storyGoal.trim()||storyGoal.length>5000||storyBible.length>15000)throw Error('Invalid episode story')
-  return withDraftLock(path(projectId,episodeId),async()=>{
+  return withDraftLock(path(projectId,'series_planning'),async()=>
+    withDraftLock(path(projectId,episodeId),async()=>{
   const snapshot=await store.read(projectId)
   const series=snapshot.series
   const active=series?.episodes.find(e=>e.status==='producing')
@@ -172,12 +173,13 @@ export async function generateEpisodeDrafts(input:{projectId:string;episodeId:st
     await save(file,draft)
   }
   return draft
-  })
+    }))
 }
 /** Activate exactly one saved pair; first activation records the entire episode lifecycle. */
 export async function activateNextEpisodeDraft(projectId:string,episodeId:string,store=new ProjectStore()){
   id(projectId);id(episodeId)
-  return withDraftLock(path(projectId,episodeId),async()=>{
+  return withDraftLock(path(projectId,'series_planning'),async()=>
+    withDraftLock(path(projectId,episodeId),async()=>{
     const draft=await readEpisodeDrafts(projectId,episodeId)
     if(!draft)throw Error('No saved episode plan')
     if(!draft.targetPairs||draft.plans.length!==draft.targetPairs)
@@ -217,5 +219,5 @@ export async function activateNextEpisodeDraft(projectId:string,episodeId:string
     draft.updatedAt=new Date().toISOString()
     await save(path(projectId,episodeId),draft)
     return{snapshot:updated,remaining:draft.plans.length-draft.cursor}
-  })
+    }))
 }
