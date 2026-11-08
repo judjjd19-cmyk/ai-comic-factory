@@ -80,6 +80,8 @@ export default function WebtoonStudio(){
   const [rejectReason,setRejectReason]=useState('인물 외형 또는 구도가 콘티와 다름')
   const [qaIssues,setQaIssues]=useState<Array<{severity:string;code:string;message:string}>>([])
   const stripRef=useRef<HTMLDivElement>(null)
+  const renderPollingRef=useRef(false)
+  const [pollFailed,setPollFailed]=useState(false)
   const cancelPlanningRef=useRef(false)
 
   const refresh=useCallback(async(id=projectId)=>{
@@ -119,6 +121,7 @@ export default function WebtoonStudio(){
       if(onDone)onDone(data)
       setMessage(action+' 완료')
       if(action==='create')await refresh('')
+      if(action==='startPanel'||action==='pollPanel')await refresh(projectId)
     }catch(e){setMessage('오류: '+(e instanceof Error?e.message:String(e)))}
     finally{setBusy(false)}
   }
@@ -180,6 +183,7 @@ export default function WebtoonStudio(){
     })
   }
   const startRender=async(pairId:string,index:0|1)=>{
+    setPollFailed(false)
     await run('startPanel',{pairId,panelIndex:index})
   }
   const pollRender=async(pairId:string,index:0|1)=>{
@@ -188,6 +192,35 @@ export default function WebtoonStudio(){
       else if(result.status==='error')setMessage(result.error||'ComfyUI 오류')
     })
   }
+  // Poll only while a ComfyUI job is rendering. Human QA/approval remains mandatory.
+  useEffect(()=>{
+    if(!authorized||!projectId||busy||pollFailed||!lastPair)return
+    const status=lastPair.job.status
+    if(status!=='rendering_first'&&status!=='rendering_second')return
+    const pairId=lastPair.plan.id
+    const index:0|1=status==='rendering_first'?0:1
+    let disposed=false
+    const timer=setInterval(()=>{
+      if(renderPollingRef.current)return
+      renderPollingRef.current=true
+      void request('pollPanel',{projectId,pairId,panelIndex:index})
+        .then(async data=>{
+          if(disposed)return
+          if(data.status==='review'){
+            setPollFailed(false)
+            if(data.snapshot)setSnapshot(data.snapshot)
+            else await refresh(projectId)
+            setMessage('작화 완료. 원본·대사·인물 일치를 검수한 뒤 승인해.')
+          }else if(data.status==='error'){
+            setPollFailed(true)
+            setMessage('이미지 생성 오류: '+(data.error||'알 수 없는 오류'))
+          }
+        }).catch(e=>{
+          if(!disposed)setMessage('렌더링 상태 조회 실패: '+String(e))
+        }).finally(()=>{renderPollingRef.current=false})
+    },3500)
+    return()=>{disposed=true;clearInterval(timer)}
+  },[authorized,projectId,busy,pollFailed,lastPair?.plan.id,lastPair?.job.status,refresh])
   const approvePanel=async(pairId:string,index:0|1,assetId:string)=>{
     if(!reviewCheck)return
     await run('approvePanel',{pairId,panelIndex:index,assetId},()=>setReviewCheck(false))
