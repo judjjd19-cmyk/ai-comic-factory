@@ -241,8 +241,7 @@ export class ProjectStore {
       if (!asset || asset.kind !== 'previous-panel' || asset.ownerId !== entry.plan.panels[panelIndex].id ||
           asset.status !== 'draft' || !asset.sha256 || !asset.uri.startsWith('assets/'))
         throw new Error('Cannot approve an unstaged or mismatched image')
-      const actual = await readFile(join(this.dir(projectId), asset.uri))
-      if (hash(actual) !== asset.sha256) throw new Error('Image checksum mismatch at approval')
+      await this.verifiedAsset(projectId,asset)
       asset.status = 'approved'
       entry.job = transitionPairJob(entry.job, panelIndex === 0 ? 'approve_first' : 'approve_second', assetId)
       snapshot.approvedPanels.push({id:entry.plan.panels[panelIndex].id,sceneId:entry.plan.panels[panelIndex].sceneId,
