@@ -80,6 +80,7 @@ export default function WebtoonStudio(){
   const [episodePairs,setEpisodePairs]=useState(10)
   const [remainingDrafts,setRemainingDrafts]=useState<number|null>(null)
   const [storyBible,setStoryBible]=useState('')
+  const [loadedStoryVersion,setLoadedStoryVersion]=useState<string>('')
   const [castSuggestions,setCastSuggestions]=useState<CastProposals|null>(null)
   const [reviewCheck,setReviewCheck]=useState(false)
   const [rejectReason,setRejectReason]=useState('인물 외형 또는 구도가 콘티와 다름')
@@ -133,6 +134,14 @@ export default function WebtoonStudio(){
   }
   const selectedMasterDraft=snapshot?.catalog.assets.find(a=>a.id===draftId)
   const lastPair=snapshot?.pairs.at(-1)
+  useEffect(()=>{
+    if(!snapshot?.story)return
+    const key=snapshot.projectId+':'+snapshot.story.version
+    if(key===loadedStoryVersion)return
+    setStoryGoal(snapshot.story.premise)
+    setStoryBible(snapshot.story.bible)
+    setLoadedStoryVersion(key)
+  },[snapshot?.projectId,snapshot?.story?.version,loadedStoryVersion])
   const assetForPanel=(panelId:string)=>snapshot?.catalog.assets.filter(a=>
     a.kind==='previous-panel'&&a.ownerId===panelId&&a.status!=='rejected').at(-1)
   const saveBubble=async(panelId:string,bubble:BubblePlan,text:string,box=bubble.box)=>{
@@ -359,6 +368,18 @@ export default function WebtoonStudio(){
           <button disabled={busy} onClick={()=>void run('create',{projectId:newId},()=>setProjectId(newId))}
             className="rounded bg-stone-900 text-white px-4 py-2 disabled:opacity-40">작품 생성</button>
         </div>
+        {snapshot&&<div className="space-y-2 border-t pt-3">
+          <h3 className="font-semibold">작품 줄거리 · 세계관 원본</h3>
+          <textarea className="border rounded p-2 w-full" rows={3} value={storyGoal}
+            onChange={e=>setStoryGoal(e.target.value)} aria-label="작품 핵심 줄거리"/>
+          <textarea className="border rounded p-2 w-full" rows={3} value={storyBible}
+            onChange={e=>setStoryBible(e.target.value)} aria-label="세계관 및 서사 규칙"/>
+          <button disabled={busy||!storyGoal.trim()} className="border rounded px-3 py-2"
+            onClick={()=>void run('saveStory',{storyGoal,storyBibleSummary:storyBible})}>
+            작품 설정 영구 저장
+          </button>
+          <p className="text-xs text-stone-500">스토리 정보는 승인된 이미지에 덮어쓰지 않고 별도로 저장돼.</p>
+        </div>}
         {snapshot&&<p className="text-sm text-stone-500">리비전 {snapshot.revision} · 캐릭터 {snapshot.catalog.characters.length}명 · 장소 {snapshot.catalog.locations.length}개</p>}
       </section>
       {snapshot&&<section className="rounded-xl bg-white p-4 space-y-3">

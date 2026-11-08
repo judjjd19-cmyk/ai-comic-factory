@@ -293,3 +293,8 @@ export async function suggestWebtoonCast(story:string,bible:string){
     llmVendorConfig:{vendor:'SERVER',apiKey:'',modelId:''}
   }))
 }
+
+export async function saveWebtoonStory(projectId:string,premise:string,bible:string){
+  const snapshot=await store.read(projectId)
+  return store.updateStory(projectId,snapshot.revision,premise,bible)
+}
