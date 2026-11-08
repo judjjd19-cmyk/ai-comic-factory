@@ -44,8 +44,8 @@ export function getActiveEpisode(series:SeriesLedger):EpisodeRecord|undefined{
 }
 export function beginEpisode(series:SeriesLedger,input:{id:string;targetPairs:number;startState:SceneState;outline?:EpisodeOutline}):EpisodeRecord{
   if(!valid(input.id))throw Error('Invalid episode ID')
-  if(!Number.isInteger(input.targetPairs)||input.targetPairs<1||input.targetPairs>50)
-    throw Error('Episode pair count must be 1-50')
+  if(!Number.isInteger(input.targetPairs)||input.targetPairs<1||input.targetPairs>250)
+    throw Error('Episode pair count must be 1-250')
   if(series.episodes.some(e=>e.id===input.id))throw Error('Episode ID already exists')
   if(getActiveEpisode(series))throw Error('Finish the current episode before starting another')
   const previous=series.episodes.at(-1)
