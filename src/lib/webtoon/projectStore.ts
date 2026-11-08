@@ -258,6 +258,18 @@ export class ProjectStore {
     })
   }
 
+  /** A change to earlier dialogue must be checked against planned downstream scenes. */
+  async acknowledgeEpisodeContinuity(projectId:string,revision:number,episodeId:string,
+    reviewer:string):Promise<ProjectSnapshot>{
+    if(!reviewer.trim())throw Error('Reviewer name is required')
+    return this.modify(projectId,revision,snapshot=>{
+      const episode=snapshot.series?.episodes.find(e=>e.id===episodeId&&e.status==='producing')
+      if(!episode)throw Error('Active episode not found')
+      episode.continuityReviewRequired=false
+      episode.continuityReviewedAt=new Date().toISOString()
+    })
+  }
+
   /** Completion is atomic: only all-approved, ordered panels may become an episode. */
   async finalizeEpisode(projectId:string,revision:number,episodeId:string,
     input:EpisodeCompletion):Promise<ProjectSnapshot>{
@@ -434,6 +446,14 @@ export class ProjectStore {
       if(completed)throw new Error('Finalized episode dialogue is immutable')
       const panel=parent?.plan.panels.find(p=>p.id===panelId)
       if(!panel||!panel.bubbles.some(b=>b.id===bubbleId))throw new Error('Unknown bubble')
+      const original=panel.bubbles.find(b=>b.id===bubbleId)!
+      const existingText=snapshot.bubbleOverrides?.[panelId]?.[bubbleId]?.text??original.text
+      const episode=snapshot.series?.episodes.find(e=>e.id===parent?.plan.episodeId)
+      if(episode&&text!==existingText){
+        const pairPosition=episode.pairIds.indexOf(parent!.plan.id)
+        if(pairPosition>=0&&pairPosition<episode.pairIds.length-1)
+          episode.continuityReviewRequired=true
+      }
       snapshot.bubbleOverrides ||= {}
       snapshot.bubbleOverrides[panelId] ||= {}
       snapshot.bubbleOverrides[panelId][bubbleId]={text,box}

@@ -17,6 +17,8 @@ export interface EpisodeRecord{
   id:string;ordinal:number;status:EpisodeStatus;targetPairs:number
   pairIds:string[];startState:SceneState;createdAt:string
   outline?:EpisodeOutline;handoff?:EpisodeHandoff
+  continuityReviewRequired?:boolean
+  continuityReviewedAt?:string
 }
 export interface SeriesLedger{
   episodes:EpisodeRecord[];threads:SeriesThread[];relationships:RelationshipNote[]
@@ -76,6 +78,7 @@ export function prepareEpisodeHandoff(series:SeriesLedger,episodeId:string,
   const ep=series.episodes.find(e=>e.id===episodeId)
   if(!ep||ep.status!=='producing'||getActiveEpisode(series)?.id!==episodeId)
     throw Error('Episode is not active')
+  if(ep.continuityReviewRequired)throw Error('Downstream story continuity must be reviewed after dialogue edits')
   if(ep.targetPairs<1||ep.pairIds.length!==ep.targetPairs)
     throw Error('Episode still has unplanned or unfinished pairs')
   const belonging=ep.pairIds.map(id=>pairs.find(p=>p.plan.id===id))
