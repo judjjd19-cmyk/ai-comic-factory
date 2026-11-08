@@ -1,6 +1,7 @@
 import 'server-only'
 
 import {mkdir,readFile,writeFile,rename,stat} from 'node:fs/promises'
+import sharp from 'sharp'
 import {resolve,join} from 'node:path'
 import {randomUUID} from 'node:crypto'
 import {ProjectStore, type ProjectSnapshot} from './projectStore'
@@ -19,16 +20,22 @@ const safeId=(x:string):string=>{
 const root=()=>resolve(process.env.WEBTOON_DATA_DIR||join(process.cwd(),'webtoon-data'))
 const taskPath=(projectId:string,pairId:string,panelIndex:0|1)=>
   join(root(),safeId(projectId),'tasks',safeId(pairId)+'_'+panelIndex+'.json')
-type Task={promptId:string;pairId:string;panelIndex:0|1;createdAt:string}
+type Task={promptId:string;pairId:string;panelIndex:0|1;createdAt:string;
+  status:'pending'|'failed';attempt:number;width:number;height:number;error?:string}
 async function getTask(projectId:string,pairId:string,panelIndex:0|1):Promise<Task|null>{
   try{return JSON.parse(await readFile(taskPath(projectId,pairId,panelIndex),'utf8')) as Task}
   catch(e){if((e as NodeJS.ErrnoException).code==='ENOENT')return null;throw e}
 }
-async function saveTask(projectId:string,task:Task):Promise<void>{
+async function saveTask(projectId:string,task:Task,replace=false):Promise<void>{
   const file=taskPath(projectId,task.pairId,task.panelIndex)
   await mkdir(join(root(),safeId(projectId),'tasks'),{recursive:true})
-  // Exclusive write prevents one user from clobbering another user's pending render.
-  await writeFile(file,JSON.stringify(task,null,2),{flag:'wx'})
+  if(!replace){
+    await writeFile(file,JSON.stringify(task,null,2),{flag:'wx'})
+    return
+  }
+  const temp=file+'.'+randomUUID()+'.tmp'
+  await writeFile(temp,JSON.stringify(task,null,2),{flag:'wx'})
+  await rename(temp,file)
 }
 
 export async function createWebtoonProject(projectId:string):Promise<ProjectSnapshot>{
@@ -102,15 +109,18 @@ export async function startWebtoonPanel(projectId:string,pairId:string,panelInde
     snapshot=await store.advancePair(projectId,snapshot.revision,pairId,panelIndex===0?'render_first':'render_second')
   else if(record.job.status!==expected)throw new Error('Pair cannot render in state '+record.job.status)
   const existing=await getTask(projectId,pairId,panelIndex)
-  if(existing)return{promptId:existing.promptId,status:'pending'}
+  if(existing && existing.status!=='failed')return{promptId:existing.promptId,status:'pending'}
+  if(existing && existing.attempt>=3)throw new Error('Retry budget exhausted (3 attempts)')
   const scene=await renderQueuedPanel({projectId,pairId,panelIndex,width,height})
   if(scene.status!=='pending'||!scene.renderId)throw new Error('ComfyUI did not queue this render')
-  await saveTask(projectId,{promptId:scene.renderId,pairId,panelIndex,createdAt:new Date().toISOString()})
+  await saveTask(projectId,{promptId:scene.renderId,pairId,panelIndex,createdAt:new Date().toISOString(),
+    status:'pending',attempt:(existing?.attempt||0)+1,width,height},!!existing)
   return{promptId:scene.renderId,status:'pending'}
 }
 export async function pollWebtoonPanel(projectId:string,pairId:string,panelIndex:0|1){
   const task=await getTask(projectId,pairId,panelIndex)
   if(!task)throw new Error('No recorded ComfyUI job')
+  if(task.status==='failed')return{status:'error',error:task.error||'Previous render failed; press restart'}
   let snapshot=await store.read(projectId)
   const record=snapshot.pairs.find(p=>p.plan.id===pairId)
   if(!record)throw new Error('Unknown pair')
@@ -119,10 +129,20 @@ export async function pollWebtoonPanel(projectId:string,pairId:string,panelIndex
   const expected=panelIndex===0?'rendering_first':'rendering_second'
   if(record.job.status!==expected)throw new Error('Unexpected pair state '+record.job.status)
   const result=await pollComfyUI(task.promptId)
+  if(result.status==='error'){
+    await saveTask(projectId,{...task,status:'failed',error:result.error||'ComfyUI failed'},true)
+    return{status:'error',error:result.error}
+  }
   if(result.status!=='completed')return{status:result.status,error:result.error}
   const match=/^data:(image\/png|image\/jpeg|image\/webp);base64,([A-Za-z0-9+/=]+)$/.exec(result.assetUrl)
   if(!match)throw new Error('ComfyUI returned an unsupported image')
   const bytes=Buffer.from(match[2],'base64')
+  const meta=await sharp(bytes).metadata()
+  if(meta.width!==task.width || meta.height!==task.height){
+    const message='Unexpected output dimensions: '+meta.width+'x'+meta.height
+    await saveTask(projectId,{...task,status:'failed',error:message},true)
+    return{status:'error',error:message}
+  }
   snapshot=await store.advancePair(projectId,snapshot.revision,pairId,panelIndex===0?'review_first':'review_second')
   snapshot=await store.stageImage(projectId,snapshot.revision,pairId,panelIndex,bytes,
     match[1] as 'image/png'|'image/jpeg'|'image/webp')
