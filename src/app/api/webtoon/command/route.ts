@@ -1,0 +1,82 @@
+import {
+  listWebtoonProjects,createWebtoonProject,webtoonSnapshot,stageWebtoonMaster,
+  approveWebtoonCharacter,approveWebtoonLocation,approveWebtoonSupplement,
+  generateMasterImage,pollMasterImage,planWebtoonPair,startWebtoonPanel,
+  pollWebtoonPanel,approveWebtoonPanel,editWebtoonBubble,
+} from '@/lib/webtoon/studioService'
+
+export const runtime='nodejs'
+export const dynamic='force-dynamic'
+
+/** Designed for a single-user localhost studio. Never expose without an auth layer. */
+function guard(request:Request){
+  const host=request.headers.get('host')||''
+  if(!/^(localhost|127\.0\.0\.1|\[::1\])(?::\d+)?$/.test(host)) {
+    throw new Error('This studio endpoint is restricted to localhost')
+  }
+}
+const str=(v:unknown):string=>typeof v==='string'?v:''
+const number=(v:unknown):number=>typeof v==='number'?v:Number(v)
+const index=(v:unknown):0|1=>{
+  if(v!==0&&v!==1)throw new Error('panelIndex must be 0 or 1')
+  return v
+}
+function fail(error:unknown){
+  return Response.json({ok:false,error:error instanceof Error?error.message:'Unknown error'},{status:400})
+}
+export async function GET(request:Request){
+  try{
+    guard(request)
+    const url=new URL(request.url)
+    const projectId=url.searchParams.get('projectId')
+    const data=projectId?await webtoonSnapshot(projectId):await listWebtoonProjects()
+    return Response.json({ok:true,data},{headers:{'Cache-Control':'no-store'}})
+  }catch(e){return fail(e)}
+}
+export async function POST(request:Request){
+  try{
+    guard(request)
+    if(Number(request.headers.get('content-length')||0)>28_500_000)
+      return Response.json({ok:false,error:'Request too large'},{status:413})
+    const body=await request.json() as Record<string,unknown>
+    if(!body||typeof body!=='object'||Array.isArray(body))throw new Error('Invalid request body')
+    const projectId=str(body.projectId), rev=number(body.revision), assetId=str(body.assetId)
+    let data:unknown
+    switch(str(body.action)){
+      case 'create':
+        data=await createWebtoonProject(projectId);break
+      case 'stageMaster':
+        data=await stageWebtoonMaster(projectId,rev,str(body.ownerId),
+          body.kind as 'identity'|'location'|'view'|'outfit',str(body.dataUri),str(body.outfitId)||undefined);break
+      case 'approveCharacter':
+        data=await approveWebtoonCharacter(projectId,rev,assetId,{
+          id:str(body.ownerId),displayName:str(body.displayName),
+          description:str(body.description),outfitId:str(body.outfitId)});break
+      case 'approveLocation':
+        data=await approveWebtoonLocation(projectId,rev,assetId,{
+          id:str(body.ownerId),description:str(body.description)});break
+      case 'approveSupplement':
+        data=await approveWebtoonSupplement(projectId,rev,assetId);break
+      case 'generateMaster':
+        data=await generateMasterImage(str(body.prompt),number(body.width)||768,number(body.height)||1024);break
+      case 'pollMaster':
+        data=await pollMasterImage(str(body.promptId));break
+      case 'planPair':
+        data=await planWebtoonPair(projectId,str(body.storyGoal),str(body.episodeId)||'episode1',
+          str(body.locationId)||undefined,str(body.storyBibleSummary));break
+      case 'startPanel':
+        data=await startWebtoonPanel(projectId,str(body.pairId),index(body.panelIndex),
+          number(body.width)||768,number(body.height)||1024);break
+      case 'pollPanel':
+        data=await pollWebtoonPanel(projectId,str(body.pairId),index(body.panelIndex));break
+      case 'approvePanel':
+        data=await approveWebtoonPanel(projectId,str(body.pairId),index(body.panelIndex),
+          assetId,str(body.reviewer)||'local-reviewer');break
+      case 'editBubble':
+        data=await editWebtoonBubble(projectId,str(body.panelId),str(body.bubbleId),
+          str(body.text),body.box as [number,number,number,number]);break
+      default:throw new Error('Unknown command')
+    }
+    return Response.json({ok:true,data},{headers:{'Cache-Control':'no-store'}})
+  }catch(e){return fail(e)}
+}
