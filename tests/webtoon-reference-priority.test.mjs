@@ -17,8 +17,7 @@ const panel={sceneId:'scene1',locationId:'roof',characters:[
  {characterId:'b',outfitId:'default',facing:'front'}]}
 const previous={id:'old-panel',sceneId:'scene1',assetId:'panelprev',planId:'old',approvedAt:'2026-11-08'}
 test('tight reference budgets preserve both identities and prior approved panel',()=>{
- const ids=selectReferences(panel,catalog,previous,3)
- assert.deepEqual(ids.map(x=>x.purpose),['identity','identity','continuity'])
+ assert.throws(()=>selectReferences(panel,catalog,previous,3),/Reference budget too small for location continuity/)
  const four=selectReferences(panel,catalog,previous,4)
  assert.deepEqual(four.map(x=>x.purpose),['identity','identity','continuity','location'])
 })
@@ -38,4 +37,16 @@ test('latest approved outfit/view revision is used without changing the identity
  assert(!chosen.some(r=>r.assetId==='a_outfit'))
  assert(chosen.some(r=>r.assetId==='a_front_new'&&r.purpose==='view'))
  assert(!chosen.some(r=>r.assetId==='a_front_old'))
+})
+
+test('do not silently skip location or continuation when all available slots are occupied',()=>{
+ assert.throws(()=>selectReferences(panel,catalog,previous,2),/continuity/)
+ assert.throws(()=>selectReferences(panel,catalog,previous,3),/location continuity/)
+ const selected=selectReferences(panel,catalog,previous,4)
+ assert.deepEqual(selected.map(x=>x.purpose),['identity','identity','continuity','location'])
+})
+test('missing location master is a blocking reference failure',()=>{
+ const damaged=structuredClone(catalog)
+ damaged.assets.find(a=>a.id==='roof_ref').status='rejected'
+ assert.throws(()=>selectReferences(panel,damaged,undefined,6),/Approved location reference/)
 })

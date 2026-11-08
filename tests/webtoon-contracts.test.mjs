@@ -58,7 +58,7 @@ test('reference selection prioritizes immutable masters, location and approved p
  const refs=selectReferences(p,catalog,{id:'panel_0',assetId:'panel_0_image',sceneId:'scene_1',planId:'pair_0',approvedAt:'2026-11-08'},6)
  assert.deepEqual(refs.map(x=>x.purpose),['identity','identity','continuity','location'])
  catalog.assets.find(x=>x.id==='panel_0_image').status='rejected'
- assert.equal(selectReferences(p,catalog,{id:'panel_0',assetId:'panel_0_image',sceneId:'scene_1',planId:'pair_0',approvedAt:'2026-11-08'}).some(x=>x.purpose==='continuity'),false)
+ assert.throws(()=>selectReferences(p,catalog,{id:'panel_0',assetId:'panel_0_image',sceneId:'scene_1',planId:'pair_0',approvedAt:'2026-11-08'}),/continuity reference is missing/)
 })
 test('missing anchor or insufficient budget blocks instead of silently omitting identity',()=>{
  const {pair,catalog}=fixture()
