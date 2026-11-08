@@ -189,7 +189,7 @@ export default function WebtoonStudio(){
   }
   const planPair=async()=>{
     if(!snapshot)return
-    await run('planPair',{storyGoal,episodeId,storyBibleSummary:storyBible,
+    await run('planPair',{storyGoal,episodeId,storyBibleSummary:storyBible,pairCount:episodePairs,
       locationId:snapshot.catalog.locations[0]?.id})
   }
   const planEpisode=async()=>{

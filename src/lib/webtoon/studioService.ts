@@ -145,7 +145,7 @@ export async function generateCharacterReference(projectId:string,ownerId:string
   return submitComfyUI(prompt,width,height,{uploaded,auto:{panel,masks}})
 }
 export async function planWebtoonPair(projectId:string,storyGoal:string,episodeId='episode1',
-  locationId?:string,storyBibleSummary=''):Promise<ProjectSnapshot>{
+  locationId?:string,storyBibleSummary='',targetPairs=10):Promise<ProjectSnapshot>{
   if(!storyGoal.trim()||storyGoal.length>5000)throw new Error('Story goal must be provided')
   safeId(episodeId)
   const snapshot=await store.read(projectId)
@@ -182,7 +182,7 @@ export async function planWebtoonPair(projectId:string,storyGoal:string,episodeI
     const previous=current.series?.episodes.at(-1)
     if(previous&&previous.status!=='completed')throw Error('Complete the preceding episode before starting another')
     current=await store.beginEpisode(projectId,current.revision,{
-      episodeId,targetPairs:10,startState:last?.plan.after||initial
+      episodeId,targetPairs,startState:last?.plan.after||initial
     })
   }
   return store.appendPair(projectId,current.revision,plan)

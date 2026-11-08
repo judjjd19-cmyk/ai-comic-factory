@@ -96,7 +96,7 @@ export async function POST(request:Request){
         data=await savedWebtoonEpisodeDrafts(projectId,str(body.episodeId)||'episode1');break
       case 'planPair':
         data=await planWebtoonPair(projectId,str(body.storyGoal),str(body.episodeId)||'episode1',
-          str(body.locationId)||undefined,str(body.storyBibleSummary));break
+          str(body.locationId)||undefined,str(body.storyBibleSummary),number(body.pairCount)||10);break
       case 'startPanel':
         data=await startWebtoonPanel(projectId,str(body.pairId),index(body.panelIndex),
           number(body.width)||768,number(body.height)||1024);break
