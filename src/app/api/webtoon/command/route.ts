@@ -6,6 +6,7 @@ import {
   pollWebtoonPanel,approveWebtoonPanel,rejectWebtoonPanel,editWebtoonBubble,generateCharacterReference,
   planEntireWebtoonEpisode,nextPlannedWebtoonPair,savedWebtoonEpisodeDrafts,inspectWebtoonPanel,planOneWebtoonPairStep,suggestWebtoonCast,saveWebtoonStory,createWebtoonEpisodeOutline,
   finalizeWebtoonEpisode,nextWebtoonEpisodeId,migrateWebtoonLegacyEpisodes,acknowledgeWebtoonContinuity,
+  resetWebtoonPanelTask,
 } from '@/lib/webtoon/studioService'
 
 export const runtime='nodejs'
@@ -100,6 +101,9 @@ export async function POST(request:Request){
       case 'planPair':
         data=await planWebtoonPair(projectId,str(body.storyGoal),str(body.episodeId)||'episode1',
           str(body.locationId)||undefined,str(body.storyBibleSummary),number(body.pairCount)||10);break
+      case 'resetPanelTask':
+        data=await resetWebtoonPanelTask(projectId,str(body.pairId),index(body.panelIndex),
+          str(body.reason));break
       case 'startPanel':
         data=await startWebtoonPanel(projectId,str(body.pairId),index(body.panelIndex),
           number(body.width)||768,number(body.height)||1024);break

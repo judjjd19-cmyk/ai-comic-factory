@@ -221,6 +221,26 @@ export async function startWebtoonPanel(projectId:string,pairId:string,panelInde
     }
   })
 }
+/** Explicit recovery when Colab/ComfyUI lost a prompt; never touches approved images. */
+export async function resetWebtoonPanelTask(projectId:string,pairId:string,panelIndex:0|1,reason:string){
+  if(!reason.trim()||reason.length>600)throw Error('A retry reason is required')
+  return withRenderTaskLock(projectId,pairId,panelIndex,async()=>{
+    const snapshot=await store.read(projectId)
+    const pair=snapshot.pairs.find(p=>p.plan.id===pairId)
+    const expected=panelIndex===0?'rendering_first':'rendering_second'
+    if(!pair||pair.job.status!==expected)
+      throw Error('Only an unapproved rendering job may be reset')
+    const task=await getTask(projectId,pairId,panelIndex)
+    if(!task)throw Error('No task to reset')
+    // The old Comfy job can still finish; its output is intentionally ignored.
+    // Keep a forensic record with promptId, attempt, metadata and reset reason.
+    const file=taskPath(projectId,pairId,panelIndex)
+    const archived=file+'.reset.'+randomUUID()
+    await rename(file,archived)
+    await writeFile(archived+'.reason.txt',reason.trim(),{flag:'wx'})
+    return{status:'reset',pairId,panelIndex,previousPromptId:task.promptId}
+  })
+}
 export async function pollWebtoonPanel(projectId:string,pairId:string,panelIndex:0|1){
   return withRenderTaskLock(projectId,pairId,panelIndex,async()=>{
     const task=await getTask(projectId,pairId,panelIndex)

@@ -283,6 +283,13 @@ export default function WebtoonStudio(){
     setPollFailed(false)
     await run('startPanel',{pairId,panelIndex:index})
   }
+  const resetRender=async(pairId:string,index:0|1)=>{
+    await run('resetPanelTask',{pairId,panelIndex:index,
+      reason:'ComfyUI interrupted or an earlier image job is no longer available'},()=>{
+        setPollFailed(false)
+        setMessage('기존 작업을 보관했어. 해당 컷 작업을 다시 제출해.')
+      })
+  }
   const pollRender=async(pairId:string,index:0|1)=>{
     await run('pollPanel',{pairId,panelIndex:index},result=>{
       if(result.status==='pending')setMessage('ComfyUI 렌더링 진행 중')
@@ -763,15 +770,25 @@ export default function WebtoonStudio(){
           {(['validated','rendering_first'].includes(lastPair.job.status))&&
             <button className="rounded border px-3 py-2" disabled={busy}
               onClick={()=>void startRender(lastPair.plan.id,0)}>첫 컷 작업 제출 / 재개</button>}
-          {lastPair.job.status==='rendering_first'&&
+          {lastPair.job.status==='rendering_first'&&<>
             <button className="rounded border px-3 py-2" disabled={busy}
-              onClick={()=>void pollRender(lastPair.plan.id,0)}>첫 컷 상태 조회·검수 등록</button>}
+              onClick={()=>void pollRender(lastPair.plan.id,0)}>첫 컷 상태 조회·검수 등록</button>
+            <button className="rounded border border-amber-600 px-3 py-2" disabled={busy}
+              onClick={()=>void resetRender(lastPair.plan.id,0)}>
+              중단된 첫 컷 작업 초기화
+            </button>
+          </>}
           {(['first_approved','rendering_second'].includes(lastPair.job.status))&&
             <button className="rounded border px-3 py-2" disabled={busy}
               onClick={()=>void startRender(lastPair.plan.id,1)}>두 번째 컷 작업 제출 / 재개</button>}
-          {lastPair.job.status==='rendering_second'&&
+          {lastPair.job.status==='rendering_second'&&<>
             <button className="rounded border px-3 py-2" disabled={busy}
-              onClick={()=>void pollRender(lastPair.plan.id,1)}>두 번째 컷 상태 조회·검수 등록</button>}
+              onClick={()=>void pollRender(lastPair.plan.id,1)}>두 번째 컷 상태 조회·검수 등록</button>
+            <button className="rounded border border-amber-600 px-3 py-2" disabled={busy}
+              onClick={()=>void resetRender(lastPair.plan.id,1)}>
+              중단된 두 번째 컷 작업 초기화
+            </button>
+          </>}
         </div>
         {(['review_first','review_second'].includes(lastPair.job.status))&&<>
           <label className="flex gap-2 text-sm">
