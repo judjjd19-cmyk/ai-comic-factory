@@ -1,93 +1,201 @@
-# ai-comic-factory
+---
+title: AI Comic Factory
+emoji: 👩‍🎨
+colorFrom: red
+colorTo: yellow
+sdk: docker
+pinned: true
+app_port: 3000
+disable_embedding: false
+short_description: Create your own AI comic with a single prompt
+hf_oauth: true
+hf_oauth_expiration_minutes: 43200
+hf_oauth_scopes: [inference-api]
+---
 
+# AI Comic Factory
 
+Last release: AI Comic Factory 1.2
 
-## Getting started
+The AI Comic Factory has an official website: [aicomicfactory.app](https://aicomicfactory.app)
 
-To make it easy for you to get started with GitLab, here's a list of recommended next steps.
+For more information about my other projects please check [linktr.ee/FLNGR](https://linktr.ee/FLNGR).
 
-Already a pro? Just edit this README.md and make it your own. Want to make it easy? [Use the template at the bottom](#editing-this-readme)!
+## Funding
 
-## Add your files
+If you like the AI Comic Factory, let me know!
+I am always creating new spaces and exploring new ideas for demos, meaning I don't have much time to take care of all of them (I wish I could clone myself or ask robots to do it).
 
-* [Create](https://docs.gitlab.com/user/project/repository/web_editor/#create-a-file) or [upload](https://docs.gitlab.com/user/project/repository/web_editor/#upload-a-file) files
-* [Add files using the command line](https://docs.gitlab.com/topics/git/add_files/#add-files-to-a-git-repository) or push an existing Git repository with the following command:
+If you appreciate the AI Comic Factory and would like to leave a tip, that would be very kind 🫶
 
+<a href="https://www.buymeacoffee.com/flngr" target="_blank"><img src="https://www.buymeacoffee.com/assets/img/custom_images/orange_img.png" alt="Buy Me A Coffee" style="height: 41px !important;width: 174px !important;box-shadow: 0px 3px 2px 0px rgba(190, 190, 190, 0.5) !important;-webkit-box-shadow: 0px 3px 2px 0px rgba(190, 190, 190, 0.5) !important;" ></a>
+
+## Running the project at home
+
+First, I would like to highlight that everything is open-source (see [here](https://huggingface.co/spaces/jbilcke-hf/ai-comic-factory/tree/main), [here](https://huggingface.co/spaces/jbilcke-hf/VideoChain-API/tree/main), [here](https://huggingface.co/spaces/hysts/SD-XL/tree/main), [here](https://github.com/huggingface/text-generation-inference)).
+
+However the project isn't a monolithic Space that can be duplicated and ran immediately:
+it requires various components to run for the frontend, backend, LLM, SDXL etc.
+
+If you try to duplicate the project, open the `.env` you will see it requires some variables.
+
+Provider config:
+- `LLM_ENGINE`: can be one of `INFERENCE_API`, `INFERENCE_ENDPOINT`, `OPENAI`, `GROQ`, `ANTHROPIC`
+- `RENDERING_ENGINE`: can be one of: "INFERENCE_API", "INFERENCE_ENDPOINT", "REPLICATE", "VIDEOCHAIN", "OPENAI" for now, unless you code your custom solution
+
+Auth config:
+- `AUTH_HF_API_TOKEN`:  if you decide to use Hugging Face for the LLM engine (inference api model or a custom inference endpoint)
+- `AUTH_OPENAI_API_KEY`: to use OpenAI for the LLM engine
+- `AUTH_GROQ_API_KEY`: to use Groq for the LLM engine
+- `AUTH_ANTHROPIC_API_KEY`: to use Anthropic (Claude) for the LLM engine
+- `AUTH_VIDEOCHAIN_API_TOKEN`: secret token to access the VideoChain API server
+- `AUTH_REPLICATE_API_TOKEN`: in case you want to use Replicate.com
+
+Rendering config:
+- `RENDERING_HF_INFERENCE_ENDPOINT_URL`: necessary if you decide to use a custom inference endpoint
+- `RENDERING_REPLICATE_API_MODEL_VERSION`: url to the VideoChain API server
+- `RENDERING_HF_INFERENCE_ENDPOINT_URL`: optional, default to nothing
+- `RENDERING_HF_INFERENCE_API_BASE_MODEL`: optional, defaults to "stabilityai/stable-diffusion-xl-base-1.0"
+- `RENDERING_HF_INFERENCE_API_REFINER_MODEL`: optional, defaults to "stabilityai/stable-diffusion-xl-refiner-1.0"
+- `RENDERING_REPLICATE_API_MODEL`: optional, defaults to "stabilityai/sdxl"
+- `RENDERING_REPLICATE_API_MODEL_VERSION`: optional, in case you want to change the version
+
+Language model config (depending on the LLM engine you decide to use):
+- `LLM_HF_INFERENCE_ENDPOINT_URL`: "<use your own>"
+- `LLM_HF_INFERENCE_API_MODEL`: "HuggingFaceH4/zephyr-7b-beta"
+- `LLM_OPENAI_API_BASE_URL`: "https://api.openai.com/v1"
+- `LLM_OPENAI_API_MODEL`: "gpt-4-turbo"
+- `LLM_GROQ_API_MODEL`: "mixtral-8x7b-32768"
+- `LLM_ANTHROPIC_API_MODEL`: "claude-3-opus-20240229"
+
+In addition, there are some community sharing variables that you can just ignore.
+Those variables are not required to run the AI Comic Factory on your own website or computer
+(they are meant to create a connection with the Hugging Face community,
+and thus only make sense for official Hugging Face apps):
+- `NEXT_PUBLIC_ENABLE_COMMUNITY_SHARING`: you don't need this
+- `COMMUNITY_API_URL`: you don't need this
+- `COMMUNITY_API_TOKEN`: you don't need this
+- `COMMUNITY_API_ID`: you don't need this
+
+Please read the `.env` default config file for more informations.
+To customise a variable locally, you should create a `.env.local`
+(do not commit this file as it will contain your secrets).
+
+-> If you intend to run it with local, cloud-hosted and/or proprietary models **you are going to need to code 👨‍💻**.
+
+## The LLM API (Large Language Model)
+
+Currently the AI Comic Factory uses [zephyr-7b-beta](https://huggingface.co/HuggingFaceH4/zephyr-7b-beta) through an [Inference Endpoint](https://huggingface.co/docs/inference-endpoints/index).
+
+You have multiple options:
+
+### Option 1: Use an Inference API model
+
+This is a new option added recently, where you can use one of the models from the Hugging Face Hub. By default we suggest to use [zephyr-7b-beta](https://huggingface.co/HuggingFaceH4/zephyr-7b-beta) as it will provide better results than the 7b model.
+
+To activate it, create a `.env.local` configuration file:
+
+```bash
+LLM_ENGINE="INFERENCE_API"
+
+HF_API_TOKEN="Your Hugging Face token"
+
+# "HuggingFaceH4/zephyr-7b-beta" is used by default, but you can change this
+# note: You should use a model able to generate JSON responses,
+# so it is storngly suggested to use at least the 34b model
+HF_INFERENCE_API_MODEL="HuggingFaceH4/zephyr-7b-beta"
 ```
-cd existing_repo
-git remote add origin https://gitlab.com/judjjd19/ai-comic-factory.git
-git branch -M main
-git push -uf origin main
+
+### Option 2: Use an Inference Endpoint URL
+
+If you would like to run the AI Comic Factory on a private LLM running on the Hugging Face Inference Endpoint service, create a `.env.local` configuration file:
+
+```bash
+LLM_ENGINE="INFERENCE_ENDPOINT"
+
+HF_API_TOKEN="Your Hugging Face token"
+
+HF_INFERENCE_ENDPOINT_URL="path to your inference endpoint url"
 ```
 
-## Integrate with your tools
+To run this kind of LLM locally, you can use [TGI](https://github.com/huggingface/text-generation-inference) (Please read [this post](https://github.com/huggingface/text-generation-inference/issues/726) for more information about the licensing).
 
-* [Set up project integrations](https://gitlab.com/judjjd19/ai-comic-factory/-/settings/integrations)
+### Option 3: Use an OpenAI API Key
 
-## Collaborate with your team
+This is a new option added recently, where you can use OpenAI API with an OpenAI API Key.
 
-* [Invite team members and collaborators](https://docs.gitlab.com/user/project/members/)
-* [Create a new merge request](https://docs.gitlab.com/user/project/merge_requests/creating_merge_requests/)
-* [Automatically close issues from merge requests](https://docs.gitlab.com/user/project/issues/managing_issues/#closing-issues-automatically)
-* [Enable merge request approvals](https://docs.gitlab.com/user/project/merge_requests/approvals/)
-* [Set auto-merge](https://docs.gitlab.com/user/project/merge_requests/auto_merge/)
+To activate it, create a `.env.local` configuration file:
 
-## Test and Deploy
+```bash
+LLM_ENGINE="OPENAI"
 
-Use the built-in continuous integration in GitLab.
+# default openai api base url is: https://api.openai.com/v1
+LLM_OPENAI_API_BASE_URL="A custom OpenAI API Base URL if you have some special privileges"
 
-* [Get started with GitLab CI/CD](https://docs.gitlab.com/ci/quick_start/)
-* [Analyze your code for known vulnerabilities with Static Application Security Testing (SAST)](https://docs.gitlab.com/user/application_security/sast/)
-* [Deploy to Kubernetes, Amazon EC2, or Amazon ECS using Auto Deploy](https://docs.gitlab.com/topics/autodevops/requirements/)
-* [Use pull-based deployments for improved Kubernetes management](https://docs.gitlab.com/user/clusters/agent/)
-* [Set up protected environments](https://docs.gitlab.com/ci/environments/protected_environments/)
+LLM_OPENAI_API_MODEL="gpt-4-turbo"
 
-***
+AUTH_OPENAI_API_KEY="Yourown OpenAI API Key"
+```
+### Option 4: (new, experimental) use Groq
 
-# Editing this README
+```bash
+LLM_ENGINE="GROQ"
 
-When you're ready to make this README your own, just edit this file and use the handy template below (or feel free to structure it however you want - this is just a starting point!). Thanks to [makeareadme.com](https://www.makeareadme.com/) for this template.
+LLM_GROQ_API_MODEL="mixtral-8x7b-32768"
 
-## Suggestions for a good README
+AUTH_GROQ_API_KEY="Your own GROQ API Key"
+```
+### Option 5: (new, experimental) use Anthropic (Claude)
 
-Every project is different, so consider which of these sections apply to yours. The sections used in the template are suggestions for most open source projects. Also keep in mind that while a README can be too long and detailed, too long is better than too short. If you think your README is too long, consider utilizing another form of documentation rather than cutting out information.
+```bash
+LLM_ENGINE="ANTHROPIC"
 
-## Name
-Choose a self-explaining name for your project.
+LLM_ANTHROPIC_API_MODEL="claude-3-opus-20240229"
 
-## Description
-Let people know what your project can do specifically. Provide context and add a link to any reference visitors might be unfamiliar with. A list of Features or a Background subsection can also be added here. If there are alternatives to your project, this is a good place to list differentiating factors.
+AUTH_ANTHROPIC_API_KEY="Your own ANTHROPIC API Key"
+```
 
-## Badges
-On some READMEs, you may see small images that convey metadata, such as whether or not all the tests are passing for the project. You can use Shields to add some to your README. Many services also have instructions for adding a badge.
+### Option 6: Fork and modify the code to use a different LLM system
 
-## Visuals
-Depending on what you are making, it can be a good idea to include screenshots or even a video (you'll frequently see GIFs rather than actual videos). Tools like ttygif can help, but check out Asciinema for a more sophisticated method.
+Another option could be to disable the LLM completely and replace it with another LLM protocol and/or provider (eg. Claude, Replicate), or a human-generated story instead (by returning mock or static data).
 
-## Installation
-Within a particular ecosystem, there may be a common way of installing things, such as using Yarn, NuGet, or Homebrew. However, consider the possibility that whoever is reading your README is a novice and would like more guidance. Listing specific steps helps remove ambiguity and gets people to using your project as quickly as possible. If it only runs in a specific context like a particular programming language version or operating system or has dependencies that have to be installed manually, also add a Requirements subsection.
+### Notes
 
-## Usage
-Use examples liberally, and show the expected output if you can. It's helpful to have inline the smallest example of usage that you can demonstrate, while providing links to more sophisticated examples if they are too long to reasonably include in the README.
+It is possible that I modify the AI Comic Factory to make it easier in the future (eg. add support for Claude or Replicate)
 
-## Support
-Tell people where they can go to for help. It can be any combination of an issue tracker, a chat room, an email address, etc.
+## The Rendering API
 
-## Roadmap
-If you have ideas for releases in the future, it is a good idea to list them in the README.
+This API is used to generate the panel images. This is an API I created for my various projects at Hugging Face.
 
-## Contributing
-State if you are open to contributions and what your requirements are for accepting them.
+I haven't written documentation for it yet, but basically it is "just a wrapper ™" around other existing APIs:
 
-For people who want to make changes to your project, it's helpful to have some documentation on how to get started. Perhaps there is a script that they should run or some environment variables that they need to set. Make these steps explicit. These instructions could also be useful to your future self.
+- The [hysts/SD-XL](https://huggingface.co/spaces/hysts/SD-XL?duplicate=true) Space by [@hysts](https://huggingface.co/hysts)
+- And other APIs for making videos, adding audio etc.. but you won't need them for the AI Comic Factory
 
-You can also document commands to lint the code or run tests. These steps help to ensure high code quality and reduce the likelihood that the changes inadvertently break something. Having instructions for running tests is especially helpful if it requires external setup, such as starting a Selenium server for testing in a browser.
+### Option 1: Deploy VideoChain yourself
 
-## Authors and acknowledgment
-Show your appreciation to those who have contributed to the project.
+You will have to [clone](https://huggingface.co/spaces/jbilcke-hf/VideoChain-API?duplicate=true) the [source-code](https://huggingface.co/spaces/jbilcke-hf/VideoChain-API/tree/main)
 
-## License
-For open source projects, say how it is licensed.
+Unfortunately, I haven't had the time to write the documentation for VideoChain yet.
+(When I do I will update this document to point to the VideoChain's README)
 
-## Project status
-If you have run out of energy or time for your project, put a note at the top of the README saying that development has slowed down or stopped completely. Someone may choose to fork your project or volunteer to step in as a maintainer or owner, allowing your project to keep going. You can also make an explicit request for maintainers.
+
+### Option 2: Use Replicate
+
+To use Replicate, create a `.env.local` configuration file:
+
+```bash
+RENDERING_ENGINE="REPLICATE"
+
+RENDERING_REPLICATE_API_MODEL="stabilityai/sdxl"
+
+RENDERING_REPLICATE_API_MODEL_VERSION="da77bc59ee60423279fd632efb4795ab731d9e3ca9705ef3341091fb989b7eaf"
+
+AUTH_REPLICATE_API_TOKEN="Your Replicate token"
+```
+
+### Option 3: Use another SDXL API
+
+If you fork the project you will be able to modify the code to use the Stable Diffusion technology of your choice (local, open-source, proprietary, your custom HF Space etc).
+
+It would even be something else, such as Dall-E.
