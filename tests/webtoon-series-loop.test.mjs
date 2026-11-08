@@ -137,3 +137,23 @@ test('episode completion detects corruption of a previously approved image',()=>
  }),/checksum|hash|mismatch/i)
  assert.equal((await store.read('serial')).series.episodes[0].status,'producing')
 }))
+
+test('editing early dialogue after later pairs exist blocks finalization until downstream review',()=>env(async store=>{
+ await generateEpisodeDrafts({projectId:'serial',episodeId:'episode1',
+   storyGoal:'이어지는 대화',storyBible:'',pairCount:2},llm,store)
+ let state=await completePair(store,'episode1')
+ state=await completePair(store,'episode1')
+ const first=state.pairs[0].plan.panels[0]
+ state=await store.setBubble('serial',state.revision,first.id,first.bubbles[0].id,
+   '이전 설정과 충돌할 수도 있는 수정 대사',[.65,.03,.3,.2])
+ assert.equal(state.series.episodes[0].continuityReviewRequired,true)
+ await assert.rejects(store.finalizeEpisode('serial',state.revision,'episode1',{
+   summary:'이야기',endingHook:'다음 화',openThreads:[],resolveThreadIds:[]
+ }),/Downstream story continuity must be reviewed/)
+ state=await store.acknowledgeEpisodeContinuity('serial',state.revision,'episode1','reviewer')
+ assert.equal(state.series.episodes[0].continuityReviewRequired,false)
+ state=await store.finalizeEpisode('serial',state.revision,'episode1',{
+   summary:'이야기',endingHook:'다음 화',openThreads:[],resolveThreadIds:[]
+ })
+ assert.equal(state.series.episodes[0].status,'completed')
+}))
