@@ -169,7 +169,8 @@ export async function planWebtoonPair(projectId:string,storyGoal:string,episodeI
     pairId,episodeId,storyGoal,storyBibleSummary,
     approvedHistorySummary:('CANONICAL_EPISODE_MEMORY: '+seriesNarrativeContext(snapshot.series)+'\n'+
       snapshot.pairs.slice(-8).map(p=>
-        p.plan.panels.map(x=>x.summary+' '+x.bubbles.map(b=>b.text).join(' ')).join(' / ')).join('\n')).slice(0,10000),
+        p.plan.panels.map(x=>x.summary+' '+x.bubbles.map(b=>
+          snapshot.bubbleOverrides?.[x.id]?.[b.id]?.text??b.text).join(' ')).join(' / ')).join('\n')).slice(0,10000),
     before:last?.plan.after||initial,catalog:snapshot.catalog
   }
   const plan:PairPlan=await generatePairPlan(input,({systemPrompt,userPrompt,maxNewTokens})=>predict({

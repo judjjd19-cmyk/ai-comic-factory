@@ -491,7 +491,10 @@ export class ProjectStore {
       const episode=snapshot.series?.episodes.find(e=>e.id===parent?.plan.episodeId)
       if(episode&&text!==existingText){
         const pairPosition=episode.pairIds.indexOf(parent!.plan.id)
-        if(pairPosition>=0&&pairPosition<episode.pairIds.length-1)
+        const laterPairExists=pairPosition>=0&&pairPosition<episode.pairIds.length-1
+        const laterPanelAlreadyRendered=panelId===parent!.plan.panels[0].id&&
+          ['first_approved','rendering_second','review_second','approved'].includes(parent!.job.status)
+        if(laterPairExists||laterPanelAlreadyRendered)
           episode.continuityReviewRequired=true
       }
       snapshot.bubbleOverrides ||= {}
