@@ -1,6 +1,7 @@
 import sharp from 'sharp'
 import {randomUUID} from 'node:crypto'
 import type {Bounds} from './contracts'
+import {requireLocalRuntimeURL} from './localRuntimeURLs.ts'
 
 /** ComfyUI LoadImageMask's alpha channel is 1-alpha: punch a transparent actor region. */
 export async function makeActorMask(width:number,height:number,box:Bounds):Promise<Buffer>{
@@ -16,8 +17,7 @@ export async function makeActorMask(width:number,height:number,box:Bounds):Promi
     .composite([{input:Buffer.from(svg),blend:'dest-out'}]).png().toBuffer()
 }
 export async function uploadActorMask(endpoint:string,data:Buffer,fetchFn:typeof fetch=fetch):Promise<string>{
-  const url=new URL(endpoint)
-  if(!['http:','https:'].includes(url.protocol))throw Error('Invalid ComfyUI endpoint')
+  requireLocalRuntimeURL(endpoint,'ComfyUI mask upload')
   const form=new FormData()
   form.append('image',new Blob([new Uint8Array(data)],{type:'image/png'}),'webtoon_region_'+randomUUID()+'.png')
   form.append('type','input')

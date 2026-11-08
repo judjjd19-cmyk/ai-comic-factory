@@ -7,6 +7,7 @@ import { createHash } from 'node:crypto'
 import { readFile, realpath } from 'node:fs/promises'
 import { resolve, sep } from 'node:path'
 import type { ReferenceAsset, SelectedReference } from './contracts.ts'
+import {requireLocalRuntimeURL} from './localRuntimeURLs.ts'
 
 export type ComfyNode = { class_type: string; inputs: Record<string, unknown> }
 export type ComfyWorkflow = Record<string, ComfyNode>
@@ -117,8 +118,7 @@ export async function uploadReferenceImage(endpoint: string, asset: ReferenceAss
   if(asset.status!=='approved' || !/^[a-f\d]{64}$/i.test(asset.sha256) || sha256(bytes)!==asset.sha256.toLowerCase())
     throw new Error('Cannot upload unapproved or changed reference image')
   if(!safeImageUri(asset.uri))throw new Error('Unsafe reference image path')
-  const url=new URL(endpoint)
-  if(url.protocol!=='http:'&&url.protocol!=='https:')throw new Error('Invalid ComfyUI endpoint protocol')
+  requireLocalRuntimeURL(endpoint,'ComfyUI reference upload')
   const imageMime=mime(asset.uri)
   if(!signature(bytes,imageMime))throw new Error('Invalid image signature')
   const extension=asset.uri.split('.').at(-1)?.toLowerCase()==='jpeg'?'jpg':asset.uri.split('.').at(-1)?.toLowerCase()

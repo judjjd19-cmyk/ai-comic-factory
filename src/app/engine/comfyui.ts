@@ -7,6 +7,7 @@ import { bindReferenceNodes, type UploadedReference, type ComfyBindings } from "
 import { buildAutoIPAdapter } from '@/lib/webtoon/autoAdapter'
 import { validateComfyWorkflow, type ComfyNodeInfo } from '@/lib/webtoon/comfyPreflight'
 import type { PanelPlan } from '@/lib/webtoon/contracts'
+import {requireLocalRuntimeURL} from '@/lib/webtoon/localRuntimeURLs'
 
 type WorkflowReferences = { uploaded: UploadedReference[]; bindings?: ComfyBindings; auto?: { panel: PanelPlan; masks:Record<string,string> } }
 
@@ -17,11 +18,8 @@ type ImageOutput = { filename: string; subfolder?: string; type?: string }
 
 function endpoint(): string {
   const value = process.env.COMFYUI_API_URL || "http://127.0.0.1:8188"
-  const url = new URL(value)
-  if (url.protocol !== "http:" && url.protocol !== "https:") {
-    throw new Error("COMFYUI_API_URL must be an HTTP(S) URL")
-  }
-  return url.origin + url.pathname.replace(/\/+$/, "")
+  const url=requireLocalRuntimeURL(value,'ComfyUI')
+  return url.origin+url.pathname.replace(/\/+$/, "")
 }
 
 function nodesByType(workflow: Workflow, classes: string[]) {
