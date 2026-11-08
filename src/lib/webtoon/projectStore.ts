@@ -7,6 +7,9 @@ import { mkdir, readFile, writeFile, rename, rm, stat, readdir, realpath } from 
 import { resolve, join, sep } from 'node:path'
 import { createHash, randomUUID } from 'node:crypto'
 import type {CastProposals} from './castPlanner.ts'
+import {emptySeries,beginEpisode,registerPair,prepareEpisodeHandoff,completeEpisode,
+  type SeriesLedger,type EpisodeCompletion,type EpisodeHandoff} from './seriesLoop.ts'
+import type {EpisodeOutline} from './storyOutline.ts'
 import {
   validatePairPlan,
   transitionPairJob,
@@ -30,6 +33,7 @@ export interface ProjectSnapshot {
   bubbleOverrides?: Record<string, Record<string, {text:string;box:[number,number,number,number]}>>
   rejections?: Array<{panelId:string;assetId:string;reason:string;at:string}>
   draftCasting?: CastProposals
+  series?: SeriesLedger
 }
 
 type NonApprovalEvent = Exclude<PairJobEvent, 'approve_first' | 'approve_second' | 'validate'>
@@ -140,7 +144,7 @@ export class ProjectStore {
       }
       for (const l of catalog.locations) assertId(l.id)
       for (const a of catalog.assets) assertId(a.id)
-      const snapshot: ProjectSnapshot = { schemaVersion: 1, revision: 0, projectId, catalog: structuredClone(catalog), pairs: [], approvedPanels: [] }
+      const snapshot: ProjectSnapshot = { schemaVersion: 1, revision: 0, projectId, catalog: structuredClone(catalog), pairs: [], approvedPanels: [], series: emptySeries() }
       await this.writeAtomic(projectId, snapshot)
       return snapshot
     })
@@ -159,6 +163,9 @@ export class ProjectStore {
       }
       const issues = validatePairPlan(plan, snapshot.catalog)
       if (issues.length) throw new Error('Invalid pair plan: ' + issues.map(i => i.code + ':' + i.path).join(', '))
+      // New series mode requires a registered episode. Old projects created before
+      // the series ledger existed retain their legacy pair recording behavior.
+      if(snapshot.series?.episodes.length)registerPair(snapshot.series,plan)
       const job = transitionPairJob({ id: plan.id, status: 'planned', revision: 0 }, 'validate')
       snapshot.pairs.push({plan: structuredClone(plan), job})
     })
@@ -223,6 +230,75 @@ export class ProjectStore {
     })
   }
 
+
+  /** Add an episode only after the preceding episode has been explicitly finalized. */
+  async beginEpisode(projectId:string,revision:number,input:{
+    episodeId:string;targetPairs:number;startState:import('./contracts.ts').SceneState;
+    outline?:EpisodeOutline
+  }):Promise<ProjectSnapshot>{
+    return this.modify(projectId,revision,snapshot=>{
+      snapshot.series ||= emptySeries()
+      const existing=snapshot.series.episodes.find(x=>x.id===input.episodeId)
+      if(existing){
+        if(existing.status!=='producing'||existing.targetPairs!==input.targetPairs||
+           JSON.stringify(existing.startState)!==JSON.stringify(input.startState))
+          throw Error('Existing episode does not match the requested opening')
+        return
+      }
+      if(snapshot.pairs.length && !snapshot.series.episodes.length)
+        throw Error('Legacy panels must be migrated before starting a new series episode')
+      beginEpisode(snapshot.series,{id:input.episodeId,targetPairs:input.targetPairs,
+        startState:input.startState,...(input.outline?{outline:input.outline}:{})})
+    })
+  }
+
+  /** Completion is atomic: only all-approved, ordered panels may become an episode. */
+  async finalizeEpisode(projectId:string,revision:number,episodeId:string,
+    input:EpisodeCompletion):Promise<ProjectSnapshot>{
+    return this.modify(projectId,revision,snapshot=>{
+      if(!snapshot.series)throw Error('No episode ledger')
+      const handoff=prepareEpisodeHandoff(snapshot.series,episodeId,snapshot.pairs,
+        new Set(snapshot.approvedPanels.map(p=>p.id)),input,
+        new Set(snapshot.catalog.characters.map(c=>c.id)))
+      completeEpisode(snapshot.series,episodeId,handoff,input)
+    })
+  }
+
+  /** A one-time, explicit upgrade for projects created before per-episode records. */
+  async migrateLegacySeries(projectId:string,revision:number):Promise<ProjectSnapshot>{
+    return this.modify(projectId,revision,snapshot=>{
+      snapshot.series ||= emptySeries()
+      if(snapshot.series.episodes.length)throw Error('Project is already in series mode')
+      if(!snapshot.pairs.length)return
+      const groups:Array<typeof snapshot.pairs>=[]
+      for(const item of snapshot.pairs){
+        let last=groups.at(-1)
+        if(!last||last[0].plan.episodeId!==item.plan.episodeId){
+          last=[];groups.push(last)
+        }
+        last.push(item)
+      }
+      for(const group of groups){
+        if(!group.every(x=>x.job.status==='approved'))
+          throw Error('All legacy panels must be approved before series migration')
+        const first=group[0].plan,last=group.at(-1)!.plan
+        const ending=last.panels[1]
+        const lastDialogue=ending.bubbles.map(b=>b.text).join(' / ').slice(0,1200)
+        const handoff:EpisodeHandoff={
+          summary:group.flatMap(p=>p.plan.panels.map(q=>q.summary)).join(' / ').slice(0,6000),
+          endingHook:ending.summary.slice(0,1200),
+          lastDialogue,
+          finalState:structuredClone(last.after),
+          unresolvedThreadIds:[],completedAt:new Date().toISOString()
+        }
+        snapshot.series.episodes.push({
+          id:first.episodeId,ordinal:snapshot.series.episodes.length+1,status:'completed',
+          targetPairs:group.length,pairIds:group.map(x=>x.plan.id),startState:structuredClone(first.before),
+          createdAt:new Date().toISOString(),handoff
+        })
+      }
+    })
+  }
   async listProjects(){
     await mkdir(this.root,{recursive:true})
     const result:Array<{projectId:string;revision:number;characters:number;pairs:number}>=[]
