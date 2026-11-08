@@ -255,11 +255,22 @@ export class ProjectStore {
   /** Completion is atomic: only all-approved, ordered panels may become an episode. */
   async finalizeEpisode(projectId:string,revision:number,episodeId:string,
     input:EpisodeCompletion):Promise<ProjectSnapshot>{
-    return this.modify(projectId,revision,snapshot=>{
+    return this.modify(projectId,revision,async snapshot=>{
       if(!snapshot.series)throw Error('No episode ledger')
       const handoff=prepareEpisodeHandoff(snapshot.series,episodeId,snapshot.pairs,
         new Set(snapshot.approvedPanels.map(p=>p.id)),input,
-        new Set(snapshot.catalog.characters.map(c=>c.id)))
+        new Set(snapshot.catalog.characters.map(c=>c.id)),snapshot.bubbleOverrides||{})
+      // Completion must not refer to missing or altered approved artworks.
+      const episode=snapshot.series.episodes.find(e=>e.id===episodeId)!
+      for(const pairId of episode.pairIds){
+        const pair=snapshot.pairs.find(p=>p.plan.id===pairId)!
+        for(const assetId of [pair.job.firstApprovedAssetId,pair.job.secondApprovedAssetId]){
+          const asset=snapshot.catalog.assets.find(a=>a.id===assetId)
+          if(!asset||asset.status!=='approved')
+            throw Error('Episode has a missing approved asset')
+          await this.verifiedAsset(projectId,asset)
+        }
+      }
       completeEpisode(snapshot.series,episodeId,handoff,input)
     })
   }
@@ -412,7 +423,10 @@ export class ProjectStore {
       box[0]<0||box[1]<0||box[2]<=0||box[3]<=0||box[0]+box[2]>1||box[1]+box[3]>1)
       throw new Error('Bubble bounds invalid')
     return this.modify(projectId,rev,snapshot=>{
-      const panel=snapshot.pairs.flatMap(p=>p.plan.panels).find(p=>p.id===panelId)
+      const parent=snapshot.pairs.find(p=>p.plan.panels.some(panel=>panel.id===panelId))
+      const completed=snapshot.series?.episodes.find(e=>e.id===parent?.plan.episodeId&&e.status==='completed')
+      if(completed)throw new Error('Finalized episode dialogue is immutable')
+      const panel=parent?.plan.panels.find(p=>p.id===panelId)
       if(!panel||!panel.bubbles.some(b=>b.id===bubbleId))throw new Error('Unknown bubble')
       snapshot.bubbleOverrides ||= {}
       snapshot.bubbleOverrides[panelId] ||= {}

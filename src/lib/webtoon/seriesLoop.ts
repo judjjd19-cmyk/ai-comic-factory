@@ -72,7 +72,7 @@ export function registerPair(series:SeriesLedger,plan:PairPlan):void{
 }
 export function prepareEpisodeHandoff(series:SeriesLedger,episodeId:string,
   pairs:SeriesPair[],approvedPanelIds:Set<string>,input:EpisodeCompletion,
-  characterIds:Set<string>):EpisodeHandoff{
+  characterIds:Set<string>,bubbleOverrides:Record<string,Record<string,{text:string}>>={}):EpisodeHandoff{
   const ep=series.episodes.find(e=>e.id===episodeId)
   if(!ep||ep.status!=='producing'||getActiveEpisode(series)?.id!==episodeId)
     throw Error('Episode is not active')
@@ -109,7 +109,9 @@ export function prepareEpisodeHandoff(series:SeriesLedger,episodeId:string,
       !rel.note.trim()||rel.note.length>1000)throw Error('Invalid relationship update')
   }
   const last=belonging.at(-1)!.plan
-  const dialogue=last.panels.at(-1)!.bubbles.map(x=>x.text).join(' / ').slice(0,1200)
+  const finalPanel=last.panels.at(-1)!
+  const dialogue=finalPanel.bubbles.map(x=>bubbleOverrides[finalPanel.id]?.[x.id]?.text??x.text)
+    .join(' / ').slice(0,1200)
   const unresolved=[
     ...series.threads.filter(x=>x.status==='open'&&!resolved.has(x.id)).map(x=>x.id),
     ...input.openThreads.map(x=>x.id)
