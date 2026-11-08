@@ -194,8 +194,8 @@ export class ProjectStore {
     return this.modify(projectId, expectedRevision, snapshot => {
       const item = snapshot.pairs.find(entry => entry.plan.id === pairId)
       if (!item) throw new Error('Unknown pair ID')
-      if (event === 'approve_first' || event === 'approve_second' || event === 'validate')
-        throw new Error('This event must use the dedicated approval function')
+      // NonApprovalEvent excludes approval/validation statically; the runtime
+      // state machine independently rejects invalid transitions.
       item.job = transitionPairJob(item.job, event)
     })
   }
