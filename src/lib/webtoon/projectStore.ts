@@ -295,7 +295,7 @@ export class ProjectStore {
 
   /** A one-time, explicit upgrade for projects created before per-episode records. */
   async migrateLegacySeries(projectId:string,revision:number):Promise<ProjectSnapshot>{
-    return this.modify(projectId,revision,snapshot=>{
+    return this.modify(projectId,revision,async snapshot=>{
       snapshot.series ||= emptySeries()
       if(snapshot.series.episodes.length)throw Error('Project is already in series mode')
       if(!snapshot.pairs.length)return
@@ -307,9 +307,29 @@ export class ProjectStore {
         }
         last.push(item)
       }
+      const importedEpisodeIds=new Set<string>()
+      const registeredPanels=new Set(snapshot.approvedPanels.map(x=>x.id))
+      let priorState:import('./contracts.ts').SceneState|undefined
       for(const group of groups){
         if(!group.every(x=>x.job.status==='approved'))
           throw Error('All legacy panels must be approved before series migration')
+        const episodeId=group[0].plan.episodeId
+        if(importedEpisodeIds.has(episodeId))
+          throw Error('Non-contiguous legacy episode '+episodeId+' requires manual reconciliation')
+        importedEpisodeIds.add(episodeId)
+        if(priorState&&JSON.stringify(priorState)!==JSON.stringify(group[0].plan.before))
+          throw Error('Legacy episodes contain a broken scene transition')
+        for(const item of group){
+          if(item.plan.episodeId!==episodeId||!item.plan.panels.every(panel=>registeredPanels.has(panel.id)))
+            throw Error('Legacy episode is missing an approved panel')
+          for(const refId of [item.job.firstApprovedAssetId,item.job.secondApprovedAssetId]){
+            const asset=snapshot.catalog.assets.find(a=>a.id===refId)
+            if(!asset||asset.status!=='approved')
+              throw Error('Legacy episode has an unapproved image asset')
+            await this.verifiedAsset(projectId,asset)
+          }
+        }
+        priorState=group.at(-1)!.plan.after
         const first=group[0].plan,last=group.at(-1)!.plan
         const ending=last.panels[1]
         const lastDialogue=ending.bubbles.map(b=>b.text).join(' / ').slice(0,1200)
