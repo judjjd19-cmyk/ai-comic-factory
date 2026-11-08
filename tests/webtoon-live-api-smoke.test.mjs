@@ -156,7 +156,7 @@ test('real Next API: masters -> local Qwen -> masked ComfyUI -> first/second app
    assert.equal(Object.values(firstGraph).filter(n=>n.class_type==='IPAdapterAdvanced').length,2)
    assert.equal(Object.values(secondGraph).filter(n=>n.class_type==='IPAdapterAdvanced').length,3)
    assert(Object.values(secondGraph).some(n=>n.class_type==='LoadImageMask'))
-   assert(uploads>=9)
+   assert(uploads>=7) // first pair panel: 2 references+mask, second: 3 references+mask
    state=await post('finalizeEpisode',{episodeId:'episode1',summary:'학교에서 인사를 나눔',
      endingHook:'누가 나타날까?',openThreads:[{id:'mystery',description:'정체불명 전학생'}],resolveThreadIds:[]})
    assert.equal(state.series.episodes[0].status,'completed')
