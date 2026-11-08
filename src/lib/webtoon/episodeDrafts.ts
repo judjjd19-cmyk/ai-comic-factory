@@ -1,4 +1,4 @@
-import {mkdir,readFile,writeFile,rename,rm} from 'node:fs/promises'
+import {mkdir,readFile,writeFile,rename,rm,stat} from 'node:fs/promises'
 import {resolve,join,dirname} from 'node:path'
 import {createHash,randomUUID} from 'node:crypto'
 import {ProjectStore} from './projectStore.ts'
@@ -33,6 +33,39 @@ export function initialScene(catalog:WebtoonCatalog,locationId?:string):SceneSta
       box:[i===0?0.08:0.54,0.23,0.36,0.67] as [number,number,number,number],
       facing:(i===0?'right':'left') as 'right'|'left',heldPropIds:[],emotion:'neutral'}))}
 }
+async function withDraftLock<T>(file:string,action:()=>Promise<T>):Promise<T>{
+  const lock=file+'.lock'
+  await mkdir(dirname(file),{recursive:true})
+  for(let retries=0;retries<2;retries++){
+    try{
+      await mkdir(lock)
+      await writeFile(join(lock,'owner.json'),JSON.stringify({pid:process.pid,at:Date.now()}))
+      try{return await action()}
+      finally{await rm(lock,{recursive:true,force:true})}
+    }catch(e){
+      if((e as NodeJS.ErrnoException).code!=='EEXIST')throw e
+      const meta=await stat(lock).catch(()=>null)
+      if(!meta)continue
+      let pid:number|null=null
+      try{pid=JSON.parse(await readFile(join(lock,'owner.json'),'utf8')).pid}
+      catch{}
+      let alive=false
+      if(Number.isInteger(pid)&&Number(pid)>1){
+        try{process.kill(pid as number,0);alive=true}
+        catch(e){alive=(e as NodeJS.ErrnoException).code==='EPERM'}
+      }
+      if(alive||Date.now()-meta.mtimeMs<15_000)
+        throw new Error('Another episode-planning request is active')
+      // Do not remove a newer lock acquired concurrently by someone else.
+      try{
+        const abandoned=lock+'.abandoned.'+randomUUID()
+        await rename(lock,abandoned)
+        await rm(abandoned,{recursive:true,force:true})
+      }catch(e){if((e as NodeJS.ErrnoException).code!=='ENOENT')throw e}
+    }
+  }
+  throw new Error('Could not acquire episode planner lock')
+}
 export async function generateEpisodeDrafts(input:{projectId:string;episodeId:string;storyGoal:string;
     storyBible:string;pairCount:number;locationId?:string;maxNewPairs?:number},llm:(messages:PlannerMessages)=>Promise<string>,
     store=new ProjectStore()):Promise<EpisodeDrafts>{
@@ -42,6 +75,7 @@ export async function generateEpisodeDrafts(input:{projectId:string;episodeId:st
   const step=input.maxNewPairs??input.pairCount
   if(!Number.isInteger(step)||step<1||step>50)throw Error('Invalid planning batch size')
   if(!storyGoal.trim()||storyGoal.length>5000||storyBible.length>15000)throw Error('Invalid episode story')
+  return withDraftLock(path(projectId,episodeId),async()=>{
   const snapshot=await store.read(projectId)
   const catalogHash=masterHash(snapshot.catalog)
   const file=path(projectId,episodeId)
@@ -67,6 +101,7 @@ export async function generateEpisodeDrafts(input:{projectId:string;episodeId:st
     await save(file,draft)
   }
   return draft
+  })
 }
 export async function activateNextEpisodeDraft(projectId:string,episodeId:string,store=new ProjectStore()){
   const draft=await readEpisodeDrafts(projectId,episodeId)
