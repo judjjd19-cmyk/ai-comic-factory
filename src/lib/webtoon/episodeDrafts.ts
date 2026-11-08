@@ -4,6 +4,7 @@ import {createHash,randomUUID} from 'node:crypto'
 import {ProjectStore} from './projectStore.ts'
 import {generatePairPlan,type PairPlannerInput,type PlannerMessages} from './pairPlanner.ts'
 import type {PairPlan,SceneState,WebtoonCatalog} from './contracts.ts'
+import {type EpisodeOutline,outlineBeatForPair} from './storyOutline.ts'
 
 const id=(s:string)=>{if(!/^[A-Za-z0-9][A-Za-z0-9_-]{0,79}$/.test(s))throw Error('Invalid identifier');return s}
 const hash=(value:unknown)=>createHash('sha256').update(JSON.stringify(value)).digest('hex')
@@ -12,13 +13,35 @@ const root=()=>resolve(process.env.WEBTOON_DATA_DIR||join(process.cwd(),'webtoon
 const path=(projectId:string,episodeId:string)=>join(root(),id(projectId),'drafts',id(episodeId)+'.json')
 export interface EpisodeDrafts {
   projectId:string;episodeId:string;catalogHash:string;storyGoal:string;storyBible:string
-  cursor:number;startIndex:number;plans:PairPlan[];updatedAt:string
+  cursor:number;startIndex:number;plans:PairPlan[];updatedAt:string;outline?:EpisodeOutline
 }
 async function save(file:string,record:EpisodeDrafts){
   await mkdir(dirname(file),{recursive:true})
   const temp=file+'.'+randomUUID()+'.tmp'
   try{await writeFile(temp,JSON.stringify(record,null,2),{flag:'wx'});await rename(temp,file)}
   finally{await rm(temp,{force:true})}
+}
+export async function saveEpisodeOutline(projectId:string,episodeId:string,
+  storyGoal:string,storyBible:string,outline:EpisodeOutline,store=new ProjectStore()):Promise<EpisodeDrafts>{
+  id(projectId);id(episodeId)
+  if(outline.episodeId!==episodeId||!storyGoal.trim()||storyGoal.length>5000||storyBible.length>15000)
+    throw Error('Invalid episode outline metadata')
+  return withDraftLock(path(projectId,episodeId),async()=>{
+    const snapshot=await store.read(projectId)
+    const file=path(projectId,episodeId)
+    const existing=await readEpisodeDrafts(projectId,episodeId)
+    if(existing && (existing.storyGoal!==storyGoal||existing.storyBible!==storyBible||
+      existing.catalogHash!==masterHash(snapshot.catalog)||existing.plans.length>0))
+      throw Error('Cannot replace outline after episode planning started or catalog changed')
+    const draft:EpisodeDrafts=existing||{
+      projectId,episodeId,storyGoal,storyBible,catalogHash:masterHash(snapshot.catalog),
+      cursor:0,startIndex:snapshot.pairs.length,plans:[],updatedAt:new Date().toISOString()
+    }
+    draft.outline=outline
+    draft.updatedAt=new Date().toISOString()
+    await save(file,draft)
+    return draft
+  })
 }
 export async function readEpisodeDrafts(projectId:string,episodeId:string):Promise<EpisodeDrafts|null>{
   try{return JSON.parse(await readFile(path(projectId,episodeId),'utf8')) as EpisodeDrafts}
@@ -92,7 +115,10 @@ export async function generateEpisodeDrafts(input:{projectId:string;episodeId:st
     const last=draft.plans.at(-1)||snapshot.pairs.at(-1)?.plan
     const before=last?.after||initialScene(snapshot.catalog,input.locationId)
     const pairId='pair'+String(draft.startIndex+i+1).padStart(5,'0')
-    const plannerInput:PairPlannerInput={pairId,episodeId,storyGoal,storyBibleSummary:storyBible,
+    const beat=draft.outline?outlineBeatForPair(draft.outline,i,input.pairCount):null
+    const direction=beat?'\nCURRENT_EPISODE_BEAT: '+JSON.stringify(beat)+
+      '\nEPISODE_THEME: '+draft.outline!.theme+'; STAKES: '+draft.outline!.stakes:''
+    const plannerInput:PairPlannerInput={pairId,episodeId,storyGoal,storyBibleSummary:storyBible+direction,
       approvedHistorySummary:draft.plans.slice(-6).map(p=>p.panels.map(q=>q.summary).join(' / ')).join('\n'),
       before,catalog:snapshot.catalog}
     const plan=await generatePairPlan(plannerInput,llm)
