@@ -142,8 +142,19 @@ export async function generateEpisodeDrafts(input:{projectId:string;episodeId:st
        draft.plans.length>input.pairCount||
        (draft.targetPairs!==undefined&&draft.targetPairs!==input.pairCount))
       throw Error('Existing draft conflicts with requested episode or pair count')
-    if(!draft.targetPairs&&draft.plans.length)
-      throw Error('Legacy planned pairs need explicit migration before new series generation')
+    if(!draft.targetPairs&&draft.plans.length){
+      // Older versions used globally numbered pair IDs. Unactivated story drafts can
+      // be upgraded without touching a single approved image or visual master.
+      if(draft.cursor!==0||draft.plans.some(plan=>snapshot.pairs.some(p=>p.plan.id===plan.id)))
+        throw Error('Legacy draft already entered production; finalize or migrate the old project first')
+      for(const [index,plan] of draft.plans.entries()){
+        plan.id=episodePairId(episodeId,index+1)
+        plan.episodeId=episodeId
+        plan.panels[0].id=plan.id+'_0'
+        plan.panels[1].id=plan.id+'_1'
+      }
+      await save(file,draft)
+    }
     draft.targetPairs=input.pairCount
   }else{
     draft={projectId,episodeId,catalogHash,storyGoal,storyBible,cursor:0,startIndex:snapshot.pairs.length,targetPairs:input.pairCount,plans:[],updatedAt:new Date().toISOString()}
