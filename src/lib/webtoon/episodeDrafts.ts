@@ -120,7 +120,7 @@ export async function generateEpisodeDrafts(input:{projectId:string;episodeId:st
       throw Error('Legacy planned pairs need explicit migration before new series generation')
     draft.targetPairs=input.pairCount
   }else{
-    draft={projectId,episodeId,catalogHash,storyGoal,storyBible,cursor:0,startIndex:snapshot.pairs.length,plans:[],updatedAt:new Date().toISOString()}
+    draft={projectId,episodeId,catalogHash,storyGoal,storyBible,cursor:0,startIndex:snapshot.pairs.length,targetPairs:input.pairCount,plans:[],updatedAt:new Date().toISOString()}
     await save(file,draft)
   }
   const target=Math.min(input.pairCount,draft.plans.length+step)
