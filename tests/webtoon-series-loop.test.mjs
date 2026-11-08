@@ -115,3 +115,25 @@ test('episode IDs are collision-free even when future outline exists before prod
  const state=await store.read('serial')
  assert.equal(state.pairs.length,0)
 }))
+
+test('cannot preplan a later episode while an earlier saved draft is unfinished',()=>env(async store=>{
+ await generateEpisodeDrafts({projectId:'serial',episodeId:'episode1',
+   storyGoal:'시작',storyBible:'',pairCount:2},llm,store)
+ await assert.rejects(generateEpisodeDrafts({projectId:'serial',episodeId:'episode2',
+   storyGoal:'이어지는 이야기',storyBible:'',pairCount:2},llm,store),
+   /Complete the earlier drafted episode episode1/)
+}))
+test('episode completion detects corruption of a previously approved image',()=>env(async store=>{
+ const {writeFile}=await import('node:fs/promises')
+ const {join}=await import('node:path')
+ await generateEpisodeDrafts({projectId:'serial',episodeId:'episode1',
+   storyGoal:'작품',storyBible:'',pairCount:1},llm,store)
+ let state=await completePair(store,'episode1')
+ const image=state.catalog.assets.find(a=>a.id===state.pairs[0].job.firstApprovedAssetId)
+ const dataDir=process.env.WEBTOON_DATA_DIR
+ await writeFile(join(dataDir,'serial',image.uri),Buffer.from('corrupted'))
+ await assert.rejects(store.finalizeEpisode('serial',state.revision,'episode1',{
+   summary:'마감',endingHook:'다음 사건',openThreads:[],resolveThreadIds:[]
+ }),/checksum|hash|mismatch/i)
+ assert.equal((await store.read('serial')).series.episodes[0].status,'producing')
+}))
