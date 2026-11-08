@@ -38,3 +38,7 @@ pnpm-lock.yaml
 
 # Generated local webtoon project state
 /webtoon-data/
+
+# Model-specific local ComfyUI wiring
+/comfyui/reference-bindings.json
+/comfyui/workflow-api.json

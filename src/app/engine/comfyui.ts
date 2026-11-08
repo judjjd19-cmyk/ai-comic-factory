@@ -3,6 +3,9 @@ import { randomUUID } from "node:crypto"
 import { readFile } from "node:fs/promises"
 import { resolve } from "node:path"
 import type { RenderedScene } from "@/types"
+import { bindReferenceNodes, type UploadedReference, type ComfyBindings } from "@/lib/webtoon/comfyReference"
+
+type WorkflowReferences = { uploaded: UploadedReference[]; bindings: ComfyBindings }
 
 // ComfyUI's exported API workflow is a dictionary keyed by node ID.
 type Inputs = Record<string, unknown>
@@ -43,7 +46,7 @@ function numeric(value: string | undefined, fallback: number): number {
   return n
 }
 
-export async function prepareComfyUIWorkflow(prompt: string, width: number, height: number): Promise<Workflow> {
+export async function prepareComfyUIWorkflow(prompt: string, width: number, height: number, references?: WorkflowReferences): Promise<Workflow> {
   if (!prompt.trim()) throw new Error("Cannot render an empty prompt")
   if (!Number.isInteger(width) || !Number.isInteger(height) || width < 64 || height < 64) {
     throw new Error("Invalid image dimensions")
@@ -53,7 +56,7 @@ export async function prepareComfyUIWorkflow(prompt: string, width: number, heig
   if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
     throw new Error("ComfyUI workflow must be an API-format node dictionary")
   }
-  const workflow = parsed as Workflow
+  let workflow = parsed as Workflow
   const samplers = nodesByType(workflow, ["KSampler", "KSamplerAdvanced"])
   const samplerId = process.env.COMFYUI_SAMPLER_NODE_ID || samplers[0]?.[0]
   if (!samplerId || !workflow[samplerId]) throw new Error("Workflow needs a KSampler node")
@@ -106,6 +109,7 @@ export async function prepareComfyUIWorkflow(prompt: string, width: number, heig
     inputs.strength_clip = numeric(process.env.COMFYUI_STYLE_LORA_CLIP_STRENGTH, 0.8)
   }
   if (!nodesByType(workflow, ["SaveImage"]).length) throw new Error("Workflow must contain SaveImage")
+  if (references?.uploaded.length) workflow = bindReferenceNodes(workflow, references.uploaded, references.bindings)
   return workflow
 }
 
@@ -113,8 +117,8 @@ function scene(renderId: string, status: RenderedScene["status"], alt = "", asse
   return { renderId, status, assetUrl, alt, error, maskUrl: "", segments: [] }
 }
 
-export async function submitComfyUI(prompt: string, width: number, height: number): Promise<RenderedScene> {
-  const workflow = await prepareComfyUIWorkflow(prompt, width, height)
+export async function submitComfyUI(prompt: string, width: number, height: number, references?: WorkflowReferences): Promise<RenderedScene> {
+  const workflow = await prepareComfyUIWorkflow(prompt, width, height, references)
   const res = await fetch(endpoint() + "/prompt", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
