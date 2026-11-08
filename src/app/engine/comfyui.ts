@@ -80,8 +80,27 @@ export async function prepareComfyUIWorkflow(prompt: string, width: number, heig
   const styleLoRA = process.env.COMFYUI_STYLE_LORA_NAME
   if (styleLoRA) {
     const loaders = nodesByType(workflow, ["LoraLoader"])
-    if (loaders.length !== 1) throw new Error("Style LoRA requires exactly one LoraLoader in the workflow")
-    const inputs = loaders[0][1].inputs
+    if (loaders.length > 1) throw new Error("A webtoon style workflow may contain at most one LoraLoader")
+    let inputs: Inputs
+    if (loaders.length === 1) {
+      inputs = loaders[0][1].inputs
+    } else {
+      // Insert the webtoon style LoRA only when a real adapter is configured.
+      // The checkpoint, text encoders and sampler remain valid without one.
+      const checkpoints = nodesByType(workflow, ["CheckpointLoaderSimple"])
+      if (checkpoints.length !== 1) throw new Error("Automatic LoRA insertion requires one CheckpointLoaderSimple")
+      const checkpointId = checkpoints[0][0]
+      const styleId = "auto_webtoon_style_lora"
+      if (workflow[styleId]) throw new Error("Reserved ComfyUI LoRA node ID is already in use")
+      inputs = {
+        model: [checkpointId, 0],
+        clip: [checkpointId, 1],
+      }
+      workflow[styleId] = { class_type: "LoraLoader", inputs }
+      sampler.model = [styleId, 0]
+      workflow[positiveId].inputs.clip = [styleId, 1]
+      workflow[negativeId].inputs.clip = [styleId, 1]
+    }
     inputs.lora_name = styleLoRA
     inputs.strength_model = numeric(process.env.COMFYUI_STYLE_LORA_STRENGTH, 0.8)
     inputs.strength_clip = numeric(process.env.COMFYUI_STYLE_LORA_CLIP_STRENGTH, 0.8)

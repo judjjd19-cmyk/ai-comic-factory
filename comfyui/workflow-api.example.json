@@ -1,31 +1,15 @@
 {
   "1": {
     "inputs": {
-      "ckpt_name": "REPLACE_WITH_INSTALLED_CHECKPOINT.safetensors"
+      "ckpt_name": "Illustrious-XL-v2.0.safetensors"
     },
     "class_type": "CheckpointLoaderSimple"
-  },
-  "2": {
-    "inputs": {
-      "lora_name": "REPLACE_WITH_INSTALLED_WEBTOON_STYLE.safetensors",
-      "strength_model": 0.8,
-      "strength_clip": 0.8,
-      "model": [
-        "1",
-        0
-      ],
-      "clip": [
-        "1",
-        1
-      ]
-    },
-    "class_type": "LoraLoader"
   },
   "3": {
     "inputs": {
       "text": "",
       "clip": [
-        "2",
+        "1",
         1
       ]
     },
@@ -35,7 +19,7 @@
     "inputs": {
       "text": "speech bubbles, text, watermark",
       "clip": [
-        "2",
+        "1",
         1
       ]
     },
@@ -58,7 +42,7 @@
       "scheduler": "normal",
       "denoise": 1,
       "model": [
-        "2",
+        "1",
         0
       ],
       "positive": [
