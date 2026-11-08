@@ -219,6 +219,64 @@ export default function WebtoonStudio(){
       setRemainingDrafts(data.remaining)
     })
   }
+  const finalizeCurrentEpisode=async()=>{
+    if(!snapshot||!selectedEpisode||!episodeReady?.ready)return
+    const openThreads=openThreadsText.split('\n').map(line=>line.trim()).filter(Boolean).map(line=>{
+      const divider=line.indexOf('|')
+      if(divider<1)throw new Error('복선 형식: thread_id | 설명')
+      return{id:line.slice(0,divider).trim(),description:line.slice(divider+1).trim()}
+    })
+    const resolveThreadIds=resolveThreadsText.split(/[,\n]/).map(x=>x.trim()).filter(Boolean)
+    const relationshipUpdates=relationshipNotesText.split('\n').map(x=>x.trim()).filter(Boolean).map(line=>{
+      const sep=line.indexOf('|')
+      const characters=line.slice(0,sep).split(',').map(x=>x.trim())
+      if(sep<0||characters.length!==2)throw new Error('관계 형식: 인물ID1,인물ID2 | 변화')
+      return{characterIds:characters as [string,string],note:line.slice(sep+1).trim()}
+    })
+    await run('finalizeEpisode',{episodeId,summary:finalSynopsis||draftEpisodeSummary(episodePairsInProject.map(p=>p.plan)),
+      endingHook:finalHook||selectedEpisode.outline?.beats.at(-1)?.event||
+        episodePairsInProject.at(-1)?.plan.panels[1].summary||'회차 종료',
+      openThreads,resolveThreadIds,relationshipUpdates},data=>{
+      const next=nextEpisodeId(data.series)
+      setEpisodeId(next)
+      setRemainingDrafts(null);setEpisodeOutline(null);setFinalSynopsis('');setFinalHook('')
+      setOpenThreadsText('');setResolveThreadsText('');setRelationshipNotesText('')
+      setMessage('회차 확정. 다음 화 '+next+'를 시작할 수 있어.')
+    })
+  }
+  useEffect(()=>{
+    if(!authorized||!projectId||!episodeId)return
+    let disposed=false
+    void request('draftStatus',{projectId,episodeId}).then(data=>{
+      if(disposed)return
+      setRemainingDrafts(data?data.plans.length-data.cursor:null)
+      setEpisodeOutline(data?.outline||null)
+    }).catch(()=>{if(!disposed)setRemainingDrafts(null)})
+    return()=>{disposed=true}
+  },[authorized,projectId,episodeId])
+  useEffect(()=>{
+    if(!authorized||!autoContinue||busy||!snapshot||!activeEpisode||!lastPair||
+      activeEpisode.id!==episodeId)return
+    const status=lastPair.job.status
+    let action:string|undefined,parameters:Record<string,unknown>={}
+    if(status==='validated'){
+      action='startPanel';parameters={pairId:lastPair.plan.id,panelIndex:0}
+    }else if(status==='first_approved'){
+      action='startPanel';parameters={pairId:lastPair.plan.id,panelIndex:1}
+    }else if(status==='approved'&&
+      activeEpisode.pairIds.length<activeEpisode.targetPairs&&remainingDrafts!==null&&remainingDrafts>0){
+      action='activateDraft';parameters={episodeId}
+    }
+    if(!action)return
+    const key=projectId+'|'+snapshot.revision+'|'+lastPair.plan.id+'|'+status+'|'+action
+    if(autoActionRef.current===key)return
+    autoActionRef.current=key
+    void run(action,parameters,data=>{
+      if(data?.snapshot)setSnapshot(data.snapshot)
+      if(typeof data?.remaining==='number')setRemainingDrafts(data.remaining)
+    })
+  },[authorized,autoContinue,busy,projectId,episodeId,snapshot?.revision,
+    lastPair?.plan.id,lastPair?.job.status,remainingDrafts])
   const startRender=async(pairId:string,index:0|1)=>{
     setPollFailed(false)
     await run('startPanel',{pairId,panelIndex:index})
