@@ -28,10 +28,16 @@ export async function saveEpisodeOutline(projectId:string,episodeId:string,
   id(projectId);id(episodeId)
   if(outline.episodeId!==episodeId||!storyGoal.trim()||storyGoal.length>5000||storyBible.length>15000)
     throw Error('Invalid episode outline metadata')
-  return withDraftLock(path(projectId,episodeId),async()=>{
+  return withDraftLock(join(root(),id(projectId),'drafts','.series-global-lock-target'),async()=>
+    withDraftLock(path(projectId,episodeId),async()=>{
     const snapshot=await store.read(projectId)
+    const active=snapshot.series?.episodes.find(e=>e.status==='producing')
+    if(active&&active.id!==episodeId)
+      throw Error('Finish the active episode before designing another')
     if(snapshot.series?.episodes.some(e=>e.id===episodeId&&e.status==='completed'))
       throw Error('Completed episode outlines are immutable')
+    await rejectUnfinishedParallelDrafts(projectId,episodeId,
+      new Set(snapshot.series?.episodes.filter(e=>e.status==='completed').map(e=>e.id)||[]))
     const file=path(projectId,episodeId)
     const existing=await readEpisodeDrafts(projectId,episodeId)
     if(existing && (existing.storyGoal!==storyGoal||existing.storyBible!==storyBible||
@@ -39,13 +45,13 @@ export async function saveEpisodeOutline(projectId:string,episodeId:string,
       throw Error('Cannot replace outline after episode planning started or catalog changed')
     const draft:EpisodeDrafts=existing||{
       projectId,episodeId,storyGoal,storyBible,catalogHash:masterHash(snapshot.catalog),
-      cursor:0,startIndex:snapshot.pairs.length,targetPairs:input.pairCount,plans:[],updatedAt:new Date().toISOString()
+      cursor:0,startIndex:snapshot.pairs.length,plans:[],updatedAt:new Date().toISOString()
     }
     draft.outline=outline
     draft.updatedAt=new Date().toISOString()
     await save(file,draft)
     return draft
-  })
+    }))
 }
 export async function readEpisodeDrafts(projectId:string,episodeId:string):Promise<EpisodeDrafts|null>{
   try{return JSON.parse(await readFile(path(projectId,episodeId),'utf8')) as EpisodeDrafts}
