@@ -1,4 +1,5 @@
 import sharp from 'sharp'
+import {randomUUID} from 'node:crypto'
 import type {Bounds} from './contracts'
 
 /** ComfyUI LoadImageMask's alpha channel is 1-alpha: punch a transparent actor region. */
@@ -14,13 +15,13 @@ export async function makeActorMask(width:number,height:number,box:Bounds):Promi
   return sharp({create:{width,height,channels:4,background:{r:0,g:0,b:0,alpha:1}}})
     .composite([{input:Buffer.from(svg),blend:'dest-out'}]).png().toBuffer()
 }
-export async function uploadActorMask(endpoint:string,data:Buffer):Promise<string>{
+export async function uploadActorMask(endpoint:string,data:Buffer,fetchFn:typeof fetch=fetch):Promise<string>{
   const url=new URL(endpoint)
   if(!['http:','https:'].includes(url.protocol))throw Error('Invalid ComfyUI endpoint')
   const form=new FormData()
-  form.append('image',new Blob([new Uint8Array(data)],{type:'image/png'}),'webtoon_region_'+Date.now()+'.png')
+  form.append('image',new Blob([new Uint8Array(data)],{type:'image/png'}),'webtoon_region_'+randomUUID()+'.png')
   form.append('type','input')
-  const response=await fetch(endpoint.replace(/\/+$/,'')+'/upload/image',{method:'POST',body:form,cache:'no-store'})
+  const response=await fetchFn(endpoint.replace(/\/+$/,'')+'/upload/image',{method:'POST',body:form,cache:'no-store'})
   if(!response.ok)throw Error('Mask upload failed: HTTP '+response.status)
   const record=await response.json() as {name?:string;subfolder?:string}
   const filename=(record.subfolder?record.subfolder+'/':'')+(record.name||'')
