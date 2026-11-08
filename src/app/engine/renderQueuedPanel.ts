@@ -27,7 +27,10 @@ export async function renderQueuedPanel({ projectId, pairId, panelIndex, width, 
     ? snapshot.approvedPanels.at(-1)
     : snapshot.approvedPanels.find(p=>p.planId===pairId&&p.id===pair.plan.panels[0].id)
   if(panelIndex===1&&!previous)throw new Error('Cannot render second panel before first approved')
-  const selected=selectReferences(panel,snapshot.catalog,previous)
+  const budget=Number(process.env.WEBTOON_REFERENCE_BUDGET||6)
+  if(!Number.isInteger(budget)||budget<1||budget>8)
+    throw new Error('WEBTOON_REFERENCE_BUDGET must be 1-8')
+  const selected=selectReferences(panel,snapshot.catalog,previous,budget)
   const projectRoot=resolve(process.env.WEBTOON_DATA_DIR||join(process.cwd(),'webtoon-data'),projectId)
   const endpoint=process.env.COMFYUI_API_URL||'http://127.0.0.1:8188'
   const uploaded=await uploadSelectedReferences(projectRoot,snapshot.catalog.assets,selected,endpoint)
