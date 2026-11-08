@@ -1,6 +1,7 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import {localStoryURL,predictWebtoonLocal} from '../src/lib/webtoon/localStoryInference.ts'
+import {requireLocalRuntimeURL} from '../src/lib/webtoon/localRuntimeURLs.ts'
 test('Webtoon Studio never silently falls back to a cloud LLM',async()=>{
  const old=process.env.LLM_OPENAI_API_BASE_URL
  try{
@@ -47,4 +48,26 @@ test('malformed local-server responses fail rather than becoming fake stories',a
      async()=>({ok:false,status:503,text:async()=>('unavailable')})),/HTTP 503/)
  }finally{if(prev===undefined)delete process.env.LLM_OPENAI_API_BASE_URL
    else process.env.LLM_OPENAI_API_BASE_URL=prev}
+})
+
+test('both local inference services reject remote and HTTPS endpoints before sending private references',async()=>{
+ for(const remote of ['https://api.example.com/v1','http://192.168.1.9:8188',
+     'http://127.0.0.1.evil.com:8188','https://localhost:8188']){
+   assert.throws(()=>requireLocalRuntimeURL(remote,'ComfyUI'),/local HTTP loopback/)
+ }
+ assert.equal(requireLocalRuntimeURL('http://127.0.0.1:8188','ComfyUI').port,'8188')
+ const {uploadReferenceImage}=await import('../src/lib/webtoon/comfyReference.ts')
+ const bytes=Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/58BAwMCAwH+VX0AAAAASUVORK5CYII=','base64')
+ const {createHash}=await import('node:crypto')
+ const sha256=createHash('sha256').update(bytes).digest('hex')
+ const asset={id:'face',kind:'identity',ownerId:'hero',status:'approved',
+   sha256,uri:'refs/face.png',version:1}
+ let outgoing=0
+ const fakeFetch=async()=>{outgoing++;throw Error('network should never be used')}
+ await assert.rejects(uploadReferenceImage('https://remote.example',asset,bytes,fakeFetch),
+   /local HTTP loopback/)
+ const {uploadActorMask}=await import('../src/lib/webtoon/regionMasks.ts')
+ await assert.rejects(uploadActorMask('https://remote.example',bytes,fakeFetch),
+   /local HTTP loopback/)
+ assert.equal(outgoing,0)
 })
