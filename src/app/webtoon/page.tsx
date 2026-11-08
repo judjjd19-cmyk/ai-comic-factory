@@ -343,16 +343,49 @@ export default function WebtoonStudio(){
     await run('approvePanel',{pairId,panelIndex:index,assetId},()=>setReviewCheck(false))
   }
   const exportImage=async()=>{
-    if(!stripRef.current)return
+    const root=stripRef.current
+    if(!root||!snapshot)return
+    const elements=Array.from(root.children).filter((x):x is HTMLElement=>x instanceof HTMLElement)
+    if(!elements.length){setMessage('선택한 화에 승인된 컷이 없어.');return}
     setBusy(true)
     try{
       const html2canvas=(await import('html2canvas')).default
-      const canvas=await html2canvas(stripRef.current,{backgroundColor:'#fff',useCORS:true,scale:2})
-      const blob=await new Promise<Blob>((resolve,reject)=>canvas.toBlob(b=>b?resolve(b):reject(Error('Export failed')),'image/png'))
-      const url=URL.createObjectURL(blob)
-      const a=document.createElement('a');a.href=url;a.download=projectId+'-webtoon.png';a.click()
-      URL.revokeObjectURL(url);setMessage('웹툰 PNG 저장 완료')
-    }catch(e){setMessage('내보내기 오류: '+String(e))}
+      const perPart=10
+      const parts=Math.ceil(elements.length/perPart)
+      for(let part=0;part<parts;part++){
+        const selection=elements.slice(part*perPart,(part+1)*perPart)
+        const panels=[]
+        for(const element of selection){
+          const canvas=await html2canvas(element,{backgroundColor:'#ffffff',useCORS:true,scale:1})
+          panels.push(canvas)
+        }
+        const width=Math.max(...panels.map(c=>c.width))
+        const gap=24
+        const height=panels.reduce((sum,c)=>sum+Math.round(c.height*width/c.width),0)+gap*(panels.length-1)
+        if(height>30000||width>8192)throw Error('웹툰 이미지 크기가 브라우저 최대치를 초과함')
+        const result=document.createElement('canvas')
+        result.width=width;result.height=height
+        const ctx=result.getContext('2d')
+        if(!ctx)throw Error('Canvas context unavailable')
+        ctx.fillStyle='#ffffff';ctx.fillRect(0,0,width,height)
+        let y=0
+        for(const canvas of panels){
+          const scaledHeight=Math.round(canvas.height*width/canvas.width)
+          ctx.drawImage(canvas,0,y,width,scaledHeight)
+          y+=scaledHeight+gap
+        }
+        const blob=await new Promise<Blob>((resolve,reject)=>
+          result.toBlob(value=>value?resolve(value):reject(Error('PNG serialization failed')),'image/png'))
+        const url=URL.createObjectURL(blob)
+        const link=document.createElement('a')
+        link.href=url
+        link.download=projectId+'-'+episodeId+'-part'+String(part+1).padStart(2,'0')+'.png'
+        link.click()
+        await new Promise(resolve=>setTimeout(resolve,120))
+        URL.revokeObjectURL(url)
+      }
+      setMessage(episodeId+' 세로 웹툰 '+elements.length+'컷을 '+parts+'개 PNG로 저장함')
+    }catch(e){setMessage('화별 내보내기 오류: '+String(e))}
     finally{setBusy(false)}
   }
 
@@ -713,11 +746,11 @@ export default function WebtoonStudio(){
       </section>}
       {snapshot&&snapshot.approvedPanels.length>0&&<section className="rounded-xl bg-white p-4 space-y-3">
         <div className="flex justify-between items-center flex-wrap">
-          <h2 className="font-bold text-xl">5. 승인된 세로 웹툰</h2>
-          <button disabled={busy} className="border rounded px-3 py-2" onClick={()=>void exportImage()}>전체 PNG 내보내기</button>
+          <h2 className="font-bold text-xl">{episodeId} · 승인된 세로 웹툰</h2>
+          <button disabled={busy} className="border rounded px-3 py-2" onClick={()=>void exportImage()}>선택 화 PNG 내보내기 (10컷씩)</button>
         </div>
         <div ref={stripRef} className="mx-auto max-w-xl bg-white space-y-5">
-          {snapshot.pairs.flatMap(pair=>pair.plan.panels.map(panel=>({pair,panel})))
+          {episodePairsInProject.flatMap(pair=>pair.plan.panels.map(panel=>({pair,panel})))
             .filter(({panel})=>snapshot.approvedPanels.some(p=>p.id===panel.id))
             .map(({panel})=>{
               const asset=assetForPanel(panel.id)
