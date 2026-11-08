@@ -17,7 +17,7 @@ import {predict} from '@/app/queries/predict'
 import {renderQueuedPanel} from '@/app/engine/renderQueuedPanel'
 import {pollComfyUI,submitComfyUI} from '@/app/engine/comfyui'
 import {generateEpisodeDrafts,activateNextEpisodeDraft,readEpisodeDrafts,initialScene,
-  saveEpisodeOutline} from './episodeDrafts'
+  saveEpisodeOutline,withSeriesPlanningLock,ensureNoOtherDraft} from './episodeDrafts'
 import {proposeCast} from './castPlanner'
 import {designEpisodeOutline} from './storyOutline'
 
@@ -148,7 +148,10 @@ export async function planWebtoonPair(projectId:string,storyGoal:string,episodeI
   locationId?:string,storyBibleSummary='',targetPairs=10):Promise<ProjectSnapshot>{
   if(!storyGoal.trim()||storyGoal.length>5000)throw new Error('Story goal must be provided')
   safeId(episodeId)
+  return withSeriesPlanningLock(projectId,async()=>{
   const snapshot=await store.read(projectId)
+  await ensureNoOtherDraft(projectId,episodeId,
+    new Set(snapshot.series?.episodes.filter(e=>e.status==='completed').map(e=>e.id)||[]))
   if(snapshot.catalog.characters.length<1)throw new Error('Register at least one character master')
   if(snapshot.catalog.locations.length<1)throw new Error('Register at least one location master')
   const last=snapshot.pairs.at(-1)
@@ -181,6 +184,7 @@ export async function planWebtoonPair(projectId:string,storyGoal:string,episodeI
   // A failed append cannot leave an empty active episode that blocks future work.
   return store.appendPair(projectId,snapshot.revision,plan,
     active?undefined:{targetPairs,startState:last?.plan.after||initial})
+  })
 }
 export async function startWebtoonPanel(projectId:string,pairId:string,panelIndex:0|1,width=768,height=1024){
   if(panelIndex!==0&&panelIndex!==1)throw new Error('Invalid panel index')

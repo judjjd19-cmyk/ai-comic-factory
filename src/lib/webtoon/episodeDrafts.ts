@@ -131,6 +131,14 @@ async function rejectUnfinishedParallelDrafts(projectId:string,currentEpisodeId:
     }
   }
 }
+export async function withSeriesPlanningLock<T>(projectId:string,action:()=>Promise<T>):Promise<T>{
+  id(projectId)
+  return withDraftLock(join(root(),projectId,'drafts','.series-global-lock-target'),action)
+}
+export async function ensureNoOtherDraft(projectId:string,episodeId:string,completedIds:Set<string>){
+  id(projectId);id(episodeId)
+  return rejectUnfinishedParallelDrafts(projectId,episodeId,completedIds)
+}
 export async function generateEpisodeDrafts(input:{projectId:string;episodeId:string;storyGoal:string;
     storyBible:string;pairCount:number;locationId?:string;maxNewPairs?:number},llm:(messages:PlannerMessages)=>Promise<string>,
     store=new ProjectStore()):Promise<EpisodeDrafts>{
