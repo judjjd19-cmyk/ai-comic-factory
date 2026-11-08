@@ -87,3 +87,19 @@ test('approved identity supports a newly introduced outfit and separate facing v
  s=await store.approveSupplementalReference('book',s.revision,back)
  assert.equal(s.catalog.assets.find(x=>x.id===back).status,'approved')
 }))
+
+test('a byte-identical rerender after rejection creates a fresh review asset',()=>run(async store=>{
+ const plan=await plannedPair(store)
+ let state=await store.appendPair('book',0,plan,{targetPairs:1,startState:plan.before})
+ state=await store.advancePair('book',state.revision,plan.id,'render_first')
+ state=await store.stageImage('book',state.revision,plan.id,0,png,'image/png')
+ const firstAsset=state.catalog.assets.at(-1).id
+ state=await store.rejectPanel('book',state.revision,plan.id,0,firstAsset,'wrong pose')
+ assert.equal(state.pairs[0].job.status,'rendering_first')
+ state=await store.stageImage('book',state.revision,plan.id,0,png,'image/png')
+ const secondAsset=state.catalog.assets.at(-1).id
+ assert.notEqual(firstAsset,secondAsset)
+ assert.equal(state.catalog.assets.find(x=>x.id===firstAsset).status,'rejected')
+ assert.equal(state.catalog.assets.find(x=>x.id===secondAsset).status,'draft')
+ assert.equal(state.pairs[0].job.status,'review_first')
+}))
