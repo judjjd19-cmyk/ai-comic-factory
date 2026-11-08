@@ -50,6 +50,11 @@ export function requireSameOrigin(request:Request):void{
   if(!origin)return
   const expected=new URL(request.url)
   const candidate=new URL(origin)
-  if(candidate.protocol!==expected.protocol||candidate.host!==expected.host)
-    throw new Error('Cross-origin studio request blocked')
+  if(candidate.protocol===expected.protocol&&candidate.host===expected.host)return
+  // Trusted proxy reconstruction for authenticated Google Colab kernel-port forwarding.
+  const forwardedHost=request.headers.get('x-forwarded-host')
+  const forwardedProto=request.headers.get('x-forwarded-proto')
+  if(forwardedHost&&forwardedProto&&candidate.host===forwardedHost&&
+     candidate.protocol===forwardedProto+':')return
+  throw new Error('Cross-origin studio request blocked')
 }
