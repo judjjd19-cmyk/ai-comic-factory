@@ -3,6 +3,7 @@
 import {useCallback,useEffect,useRef,useState} from 'react'
 import type {ProjectSnapshot} from '@/lib/webtoon/projectStore'
 import type {BubblePlan} from '@/lib/webtoon/contracts'
+import type {CastProposals} from '@/lib/webtoon/castPlanner'
 
 type ProjectListItem={projectId:string;revision:number;characters:number;pairs:number}
 type ApiReply={ok:boolean;data?:any;error?:string}
@@ -79,6 +80,7 @@ export default function WebtoonStudio(){
   const [episodePairs,setEpisodePairs]=useState(10)
   const [remainingDrafts,setRemainingDrafts]=useState<number|null>(null)
   const [storyBible,setStoryBible]=useState('')
+  const [castSuggestions,setCastSuggestions]=useState<CastProposals|null>(null)
   const [reviewCheck,setReviewCheck]=useState(false)
   const [rejectReason,setRejectReason]=useState('인물 외형 또는 구도가 콘티와 다름')
   const [qaIssues,setQaIssues]=useState<Array<{severity:string;code:string;message:string}>>([])
@@ -360,7 +362,38 @@ export default function WebtoonStudio(){
         {snapshot&&<p className="text-sm text-stone-500">리비전 {snapshot.revision} · 캐릭터 {snapshot.catalog.characters.length}명 · 장소 {snapshot.catalog.locations.length}개</p>}
       </section>
       {snapshot&&<section className="rounded-xl bg-white p-4 space-y-3">
-        <h2 className="font-bold text-xl">2. 캐릭터·장소 기준 이미지 등록</h2>
+        <h2 className="font-bold text-xl">2. 스토리에서 주요 인물·장소 초안 제안</h2>
+        <p className="text-sm text-stone-600">LLM이 캐릭터 외형과 주요 장소를 제안해. 아래 제안은 아직 기준 이미지가 아니며, 이미지를 생성·확인·승인해야 고정 원본이 돼.</p>
+        <button className="border rounded px-3 py-2 disabled:opacity-40" disabled={busy||!storyGoal.trim()}
+          onClick={()=>void run('suggestCast',{storyGoal,storyBibleSummary:storyBible},
+            data=>setCastSuggestions(data as CastProposals))}>스토리 기반 주요 캐릭터·장소 설계</button>
+        {castSuggestions&&<div className="grid md:grid-cols-2 gap-3 text-sm">
+          <div className="space-y-2">
+            <h3 className="font-semibold">캐릭터 제안</h3>
+            {castSuggestions.characters.map(c=><div key={c.id} className="border rounded p-3 space-y-1">
+              <strong>{c.displayName} ({c.id})</strong>
+              <p className="whitespace-pre-wrap">{c.appearance}</p>
+              <button className="underline" onClick={()=>{setKind('identity');setOwnerId(c.id);
+                setDisplayName(c.displayName);setDescription(c.appearance);setOutfitId(c.outfitId);
+                setFile(null);setGenerated('');setDraftId('');setMasterPromptId('')}}>
+                기준 캐릭터 이미지 만들기
+              </button>
+            </div>)}
+          </div>
+          <div className="space-y-2">
+            <h3 className="font-semibold">장소 제안</h3>
+            {castSuggestions.locations.map(l=><div key={l.id} className="border rounded p-3 space-y-1">
+              <strong>{l.id}</strong><p className="whitespace-pre-wrap">{l.description}</p>
+              <button className="underline" onClick={()=>{setKind('location');setOwnerId(l.id);
+                setDescription(l.description);setFile(null);setGenerated('');setDraftId('');setMasterPromptId('')}}>
+                장소 기준 이미지 만들기
+              </button>
+            </div>)}
+          </div>
+        </div>}
+      </section>}
+      {snapshot&&<section className="rounded-xl bg-white p-4 space-y-3">
+        <h2 className="font-bold text-xl">3. 캐릭터·장소 기준 이미지 등록</h2>
         <p className="text-sm text-stone-600">이미지를 먼저 생성하거나 업로드하고, 미리보기 확인 후 승인해야 기준 이미지로 사용돼.</p>
         <div className="grid md:grid-cols-2 gap-3">
           <div className="space-y-2">
