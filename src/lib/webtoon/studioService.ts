@@ -14,8 +14,10 @@ import {generatePairPlan} from './pairPlanner'
 import {predict} from '@/app/queries/predict'
 import {renderQueuedPanel} from '@/app/engine/renderQueuedPanel'
 import {pollComfyUI,submitComfyUI} from '@/app/engine/comfyui'
-import {generateEpisodeDrafts,activateNextEpisodeDraft,readEpisodeDrafts,initialScene} from './episodeDrafts'
+import {generateEpisodeDrafts,activateNextEpisodeDraft,readEpisodeDrafts,initialScene,
+  saveEpisodeOutline} from './episodeDrafts'
 import {proposeCast} from './castPlanner'
+import {designEpisodeOutline} from './storyOutline'
 
 const store=new ProjectStore()
 const safeId=(x:string):string=>{
@@ -297,4 +299,14 @@ export async function suggestWebtoonCast(story:string,bible:string){
 export async function saveWebtoonStory(projectId:string,premise:string,bible:string){
   const snapshot=await store.read(projectId)
   return store.updateStory(projectId,snapshot.revision,premise,bible)
+}
+
+export async function createWebtoonEpisodeOutline(projectId:string,episodeId:string,premise:string,bible:string){
+  const snapshot=await store.read(projectId)
+  const outline=await designEpisodeOutline(episodeId,premise,bible,snapshot.catalog,
+    ({systemPrompt,userPrompt,maxNewTokens})=>predict({
+      systemPrompt,userPrompt,nbMaxNewTokens:maxNewTokens,
+      llmVendorConfig:{vendor:'SERVER',apiKey:'',modelId:''}
+    }))
+  return saveEpisodeOutline(projectId,episodeId,premise,bible,outline,store)
 }

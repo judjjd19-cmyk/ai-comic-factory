@@ -79,6 +79,7 @@ export default function WebtoonStudio(){
   const [episodeId,setEpisodeId]=useState('episode1')
   const [episodePairs,setEpisodePairs]=useState(10)
   const [remainingDrafts,setRemainingDrafts]=useState<number|null>(null)
+  const [episodeOutline,setEpisodeOutline]=useState<any>(null)
   const [storyBible,setStoryBible]=useState('')
   const [loadedStoryVersion,setLoadedStoryVersion]=useState<string>('')
   const [castSuggestions,setCastSuggestions]=useState<CastProposals|null>(null)
@@ -471,6 +472,26 @@ export default function WebtoonStudio(){
         <input className="border rounded p-2 w-full" placeholder="회차 ID" value={episodeId} onChange={e=>setEpisodeId(e.target.value)}/>
         <textarea className="border rounded p-2 w-full" rows={3} value={storyGoal} onChange={e=>setStoryGoal(e.target.value)} placeholder="이번 두 컷의 사건·목표"/>
         <textarea className="border rounded p-2 w-full" rows={2} value={storyBible} onChange={e=>setStoryBible(e.target.value)} placeholder="세계관·인물 관계·주요 복선"/>
+        <div className="border rounded p-3 space-y-2">
+          <div className="flex flex-wrap items-center gap-3">
+            <button className="border rounded px-3 py-2 disabled:opacity-40" disabled={busy}
+              onClick={()=>void run('designEpisodeOutline',{episodeId,storyGoal,storyBibleSummary:storyBible},
+                data=>setEpisodeOutline(data.outline))}>
+              LLM 회차 기승전결·클리프행어 설계
+            </button>
+            <button className="underline text-sm" disabled={busy}
+              onClick={()=>void run('draftStatus',{episodeId},data=>setEpisodeOutline(data?.outline||null))}>
+              저장된 회차 기획 불러오기
+            </button>
+          </div>
+          {episodeOutline&&<div className="space-y-2 text-sm">
+            <p><strong>주제:</strong> {episodeOutline.theme}</p>
+            <p><strong>갈등·위험:</strong> {episodeOutline.stakes}</p>
+            {episodeOutline.beats?.map((beat:any)=><p key={beat.stage} className="border-l-2 pl-3">
+              <strong>{beat.stage}</strong> · {beat.event} ({beat.emotionalChange})
+            </p>)}
+          </div>}
+        </div>
         <div className="flex gap-3 items-center flex-wrap">
           <label className="text-sm">회차 2컷 쌍 수
             <input type="number" min={1} max={50} value={episodePairs}

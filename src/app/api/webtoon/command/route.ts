@@ -4,7 +4,7 @@ import {
   approveWebtoonCharacter,approveWebtoonLocation,approveWebtoonSupplement,
   generateMasterImage,pollMasterImage,planWebtoonPair,startWebtoonPanel,
   pollWebtoonPanel,approveWebtoonPanel,rejectWebtoonPanel,editWebtoonBubble,generateCharacterReference,
-  planEntireWebtoonEpisode,nextPlannedWebtoonPair,savedWebtoonEpisodeDrafts,inspectWebtoonPanel,planOneWebtoonPairStep,suggestWebtoonCast,saveWebtoonStory,
+  planEntireWebtoonEpisode,nextPlannedWebtoonPair,savedWebtoonEpisodeDrafts,inspectWebtoonPanel,planOneWebtoonPairStep,suggestWebtoonCast,saveWebtoonStory,createWebtoonEpisodeOutline,
 } from '@/lib/webtoon/studioService'
 
 export const runtime='nodejs'
@@ -66,6 +66,9 @@ export async function POST(request:Request){
         data=await saveWebtoonStory(projectId,str(body.storyGoal),str(body.storyBibleSummary));break
       case 'suggestCast':
         data=await suggestWebtoonCast(str(body.storyGoal),str(body.storyBibleSummary));break
+      case 'designEpisodeOutline':
+        data=await createWebtoonEpisodeOutline(projectId,str(body.episodeId)||'episode1',
+          str(body.storyGoal),str(body.storyBibleSummary));break
       case 'planEpisodeStep':
         data=await planOneWebtoonPairStep(projectId,str(body.episodeId)||'episode1',
           str(body.storyGoal),str(body.storyBibleSummary),number(body.pairCount),
