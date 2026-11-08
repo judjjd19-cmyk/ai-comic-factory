@@ -31,6 +31,27 @@ async function fileData(file:File):Promise<string>{
     reader.readAsDataURL(file)
   })
 }
+function BubblePositionEditor({bubble,initialBox,onSave}:{
+  bubble:BubblePlan;initialBox:[number,number,number,number];
+  onSave:(box:[number,number,number,number])=>void
+}){
+  const [box,setBox]=useState<[number,number,number,number]>(initialBox)
+  useEffect(()=>{setBox(initialBox)},[...initialBox])
+  const labels=['x','y','width','height'] as const
+  return <div className="border rounded p-2 text-xs space-y-2">
+    <strong>말풍선 {bubble.id} · {bubble.speakerId||'나레이션'}</strong>
+    <div className="grid grid-cols-4 gap-2">
+      {labels.map((label,i)=><label key={label} className="flex flex-col gap-1">
+        {label}<input type="number" step={0.01} min={0} max={1} value={box[i]}
+          className="min-w-0 border rounded p-1"
+          onChange={e=>setBox(prev=>{
+            const changed=[...prev] as [number,number,number,number]
+            changed[i]=Number(e.target.value);return changed
+          })}/></label>)}
+    </div>
+    <button className="rounded border px-2 py-1" onClick={()=>onSave(box)}>말풍선 위치·크기 적용</button>
+  </div>
+}
 export default function WebtoonStudio(){
   const [authorized,setAuthorized]=useState<boolean|null>(null)
   const [studioToken,setStudioToken]=useState('')
@@ -221,10 +242,18 @@ export default function WebtoonStudio(){
       </div>
       <div className="relative w-full aspect-[3/4] bg-stone-200">
         {asset&&<img src={assetUrl(projectId,asset.id)} alt={panel.summary} className="absolute inset-0 w-full h-full object-cover"/>}
-        {asset&&panel.bubbles.map(b=>bubbleOverlay(panel.id,b))}
+        {asset&&panel.bubbles.slice().sort((a,b)=>a.readOrder-b.readOrder).map(b=>bubbleOverlay(panel.id,b))}
         {!asset&&<div className="absolute inset-0 grid place-items-center text-sm text-stone-500">{panel.summary}</div>}
       </div>
-      <div className="px-3 py-3 text-xs text-stone-700">{panel.summary}</div>
+      <div className="px-3 py-3 text-xs text-stone-700 space-y-2">
+        <p>{panel.summary}</p>
+        {panel.bubbles.map(b=>{
+          const override=snapshot?.bubbleOverrides?.[panel.id]?.[b.id]
+          return <BubblePositionEditor key={b.id} bubble={b}
+            initialBox={override?.box||b.box}
+            onSave={box=>void saveBubble(panel.id,b,override?.text??b.text,box)}/>
+        })}
+      </div>
     </div>
   }
 
@@ -405,7 +434,7 @@ export default function WebtoonStudio(){
               const asset=assetForPanel(panel.id)
               return asset&&<div key={panel.id} className="w-full aspect-[3/4] relative bg-white">
                 <img src={assetUrl(projectId,asset.id)} className="absolute inset-0 w-full h-full object-cover" alt={panel.summary}/>
-                {panel.bubbles.map(b=>bubbleOverlay(panel.id,b,false))}
+                {panel.bubbles.slice().sort((a,b)=>a.readOrder-b.readOrder).map(b=>bubbleOverlay(panel.id,b,false))}
               </div>
             })}
         </div>
