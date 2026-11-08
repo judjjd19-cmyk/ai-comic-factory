@@ -344,6 +344,35 @@ export default function WebtoonStudio(){
     if(!reviewCheck)return
     await run('approvePanel',{pairId,panelIndex:index,assetId},()=>setReviewCheck(false))
   }
+  const exportEpisodeManifest=()=>{
+    if(!snapshot)return
+    const episode=snapshot.series?.episodes.find(e=>e.id===episodeId)
+    if(!episode){setMessage('선택한 화가 존재하지 않아.');return}
+    const pairs=snapshot.pairs.filter(pair=>pair.plan.episodeId===episode.id)
+    const approved=new Set(snapshot.approvedPanels.map(p=>p.id))
+    const result={
+      schemaVersion:1,projectId:snapshot.projectId,episode,story:snapshot.story,
+      pairs:pairs.map(pair=>({plan:pair.plan,job:pair.job,
+        panels:pair.plan.panels.map((panel,index)=>({
+          panelId:panel.id,approved:approved.has(panel.id),
+          imageAssetId:index===0?pair.job.firstApprovedAssetId:pair.job.secondApprovedAssetId,
+          dialogue:panel.bubbles.map(b=>({
+            id:b.id,type:b.type,speakerId:b.speakerId,readOrder:b.readOrder,
+            text:snapshot.bubbleOverrides?.[panel.id]?.[b.id]?.text??b.text,
+            box:snapshot.bubbleOverrides?.[panel.id]?.[b.id]?.box??b.box,
+            tailTarget:b.tailTarget
+          }))
+        }))})),
+      unresolvedThreads:snapshot.series?.threads.filter(x=>x.status==='open')||[],
+      relationships:snapshot.series?.relationships||[]
+    }
+    const blob=new Blob([JSON.stringify(result,null,2)],{type:'application/json'})
+    const link=document.createElement('a')
+    const url=URL.createObjectURL(blob)
+    link.href=url;link.download=projectId+'-'+episodeId+'-manifest.json';link.click()
+    URL.revokeObjectURL(url)
+    setMessage(episodeId+' 원고·말풍선·서사 상태 JSON을 저장함')
+  }
   const exportImage=async()=>{
     const root=stripRef.current
     if(!root||!snapshot)return
@@ -757,7 +786,14 @@ export default function WebtoonStudio(){
       {snapshot&&snapshot.approvedPanels.length>0&&<section className="rounded-xl bg-white p-4 space-y-3">
         <div className="flex justify-between items-center flex-wrap">
           <h2 className="font-bold text-xl">{episodeId} · 승인된 세로 웹툰</h2>
-          <button disabled={busy} className="border rounded px-3 py-2" onClick={()=>void exportImage()}>선택 화 PNG 내보내기 (10컷씩)</button>
+          <div className="flex gap-2 flex-wrap">
+            <button disabled={busy} className="border rounded px-3 py-2" onClick={()=>void exportImage()}>
+              선택 화 PNG 내보내기 (10컷씩)
+            </button>
+            <button className="border rounded px-3 py-2" onClick={exportEpisodeManifest}>
+              선택 화 대사·컷·서사 JSON
+            </button>
+          </div>
         </div>
         <div ref={stripRef} className="mx-auto max-w-xl bg-white space-y-5">
           {episodePairsInProject.flatMap(pair=>pair.plan.panels.map(panel=>({pair,panel})))
