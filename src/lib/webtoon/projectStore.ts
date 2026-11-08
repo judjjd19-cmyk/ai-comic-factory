@@ -6,6 +6,7 @@
 import { mkdir, readFile, writeFile, rename, rm, stat, readdir, realpath } from 'node:fs/promises'
 import { resolve, join, sep } from 'node:path'
 import { createHash, randomUUID } from 'node:crypto'
+import type {CastProposals} from './castPlanner.ts'
 import {
   validatePairPlan,
   transitionPairJob,
@@ -27,6 +28,7 @@ export interface ProjectSnapshot {
   approvedPanels: ApprovedPanel[]
   bubbleOverrides?: Record<string, Record<string, {text:string;box:[number,number,number,number]}>>
   rejections?: Array<{panelId:string;assetId:string;reason:string;at:string}>
+  draftCasting?: CastProposals
 }
 
 type NonApprovalEvent = Exclude<PairJobEvent, 'approve_first' | 'approve_second' | 'validate'>
@@ -322,6 +324,17 @@ export class ProjectStore {
       pair.job=transitionPairJob(pair.job,panelIndex===0?'retry_first':'retry_second')
       snapshot.rejections ||= []
       snapshot.rejections.push({panelId:panel.id,assetId,reason:reason.trim(),at:new Date().toISOString()})
+    })
+  }
+
+
+  async saveCasting(projectId:string,revision:number,proposals:CastProposals):Promise<ProjectSnapshot>{
+    if(proposals.characters.length<1||proposals.locations.length<1||
+       proposals.characters.length>8||proposals.locations.length>8)
+      throw new Error('Invalid casting proposal count')
+    return this.modify(projectId,revision,snapshot=>{
+      // Casting drafts never mutate approved canonical identity/locations.
+      snapshot.draftCasting=structuredClone(proposals)
     })
   }
 
