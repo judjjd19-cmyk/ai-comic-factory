@@ -15,6 +15,7 @@ import {predict} from '@/app/queries/predict'
 import {renderQueuedPanel} from '@/app/engine/renderQueuedPanel'
 import {pollComfyUI,submitComfyUI} from '@/app/engine/comfyui'
 import {generateEpisodeDrafts,activateNextEpisodeDraft,readEpisodeDrafts,initialScene} from './episodeDrafts'
+import {proposeCast} from './castPlanner'
 
 const store=new ProjectStore()
 const safeId=(x:string):string=>{
@@ -283,4 +284,12 @@ export async function planOneWebtoonPairStep(projectId:string,episodeId:string,s
       systemPrompt,userPrompt,nbMaxNewTokens:maxNewTokens,
       llmVendorConfig:{vendor:'SERVER',apiKey:'',modelId:''}
     }),store)
+}
+
+/** LLM casting proposal only; no character/location is registered without an approved image. */
+export async function suggestWebtoonCast(story:string,bible:string){
+  return proposeCast(story,bible,({systemPrompt,userPrompt,maxNewTokens})=>predict({
+    systemPrompt,userPrompt,nbMaxNewTokens:maxNewTokens,
+    llmVendorConfig:{vendor:'SERVER',apiKey:'',modelId:''}
+  }))
 }
