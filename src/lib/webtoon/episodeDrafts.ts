@@ -117,6 +117,7 @@ export async function generateEpisodeDrafts(input:{projectId:string;episodeId:st
     const pairId='pair'+String(draft.startIndex+i+1).padStart(5,'0')
     const beat=draft.outline?outlineBeatForPair(draft.outline,i,input.pairCount):null
     const direction=beat?'\nCURRENT_EPISODE_BEAT: '+JSON.stringify(beat)+
+      '\nFULL_EPISODE_ARC: '+draft.outline!.beats.map(b=>b.stage+'='+b.event).join(' | ').slice(0,2500)+
       '\nEPISODE_THEME: '+draft.outline!.theme+'; STAKES: '+draft.outline!.stakes:''
     const plannerInput:PairPlannerInput={pairId,episodeId,storyGoal,storyBibleSummary:storyBible+direction,
       approvedHistorySummary:draft.plans.slice(-6).map(p=>p.panels.map(q=>q.summary).join(' / ')).join('\n'),
