@@ -43,6 +43,7 @@ export default function WebtoonStudio(){
   const [description,setDescription]=useState('검은 머리, 짙은 갈색 눈, 현대적 교복')
   const [outfitId,setOutfitId]=useState('uniform')
   const [kind,setKind]=useState<'identity'|'location'|'view'|'outfit'>('identity')
+  const [view,setView]=useState<'front'|'left'|'right'|'back'>('front')
   const [file,setFile]=useState<File|null>(null)
   const [draftId,setDraftId]=useState('')
   const [generated,setGenerated]=useState('')
@@ -93,7 +94,7 @@ export default function WebtoonStudio(){
     let dataUri=''
     try{dataUri=generated||await fileData(file as File)}
     catch(e){setMessage(e instanceof Error?e.message:String(e));return}
-    await run('stageMaster',{revision:snapshot.revision,ownerId,kind,outfitId,dataUri},data=>{
+    await run('stageMaster',{revision:snapshot.revision,ownerId,kind,outfitId,view,dataUri},data=>{
       const latest=data.catalog.assets.at(-1)
       if(latest)setDraftId(latest.id)
       setReviewCheck(false)
@@ -214,6 +215,9 @@ export default function WebtoonStudio(){
             </select>
             <input className="border rounded p-2 w-full" placeholder="캐릭터·장소 ID" value={ownerId} onChange={e=>setOwnerId(e.target.value)}/>
             {kind==='identity'&&<input className="border rounded p-2 w-full" placeholder="표시 이름" value={displayName} onChange={e=>setDisplayName(e.target.value)}/>}
+            {kind==='view'&&<select className="border p-2 rounded w-full" value={view} onChange={e=>setView(e.target.value as typeof view)}>
+              <option value="front">정면</option><option value="left">왼쪽</option>
+              <option value="right">오른쪽</option><option value="back">후면</option></select>}
             <textarea className="border rounded p-2 w-full" placeholder="외형·장소 설명" value={description} onChange={e=>setDescription(e.target.value)} rows={3}/>
             {kind==='identity'&&<input className="border rounded p-2 w-full" placeholder="의상 ID" value={outfitId} onChange={e=>setOutfitId(e.target.value)}/>}
             <input type="file" accept="image/png,image/jpeg,image/webp" onChange={e=>{setFile(e.target.files?.[0]||null);setGenerated('')}}/>
@@ -267,7 +271,7 @@ export default function WebtoonStudio(){
           <button className="rounded bg-stone-900 text-white px-4 py-2 disabled:opacity-40"
             disabled={busy||(lastPair&&lastPair.job.status!=='approved')}
             onClick={()=>void activateDraft()}>이미지 단계: 저장된 다음 2컷 불러오기</button>
-          <button className="rounded border px-4 py-2 disabled={busy||(lastPair&&lastPair.job.status!=='approved')}
+          <button className="rounded border px-4 py-2 disabled:opacity-40" disabled={busy||(lastPair&&lastPair.job.status!=='approved')}
             onClick={()=>void planPair()}>즉석 다음 2컷 계획</button>
         </div>
         {remainingDrafts!==null&&<p className="text-sm">아직 활성화되지 않은 사전 콘티: {remainingDrafts}쌍</p>

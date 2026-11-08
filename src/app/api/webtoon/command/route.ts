@@ -48,7 +48,7 @@ export async function POST(request:Request){
         data=await createWebtoonProject(projectId);break
       case 'stageMaster':
         data=await stageWebtoonMaster(projectId,rev,str(body.ownerId),
-          body.kind as 'identity'|'location'|'view'|'outfit',str(body.dataUri),str(body.outfitId)||undefined);break
+          body.kind as 'identity'|'location'|'view'|'outfit',str(body.dataUri),str(body.outfitId)||undefined,str(body.view) as 'front'|'left'|'right'|'back');break
       case 'approveCharacter':
         data=await approveWebtoonCharacter(projectId,rev,assetId,{
           id:str(body.ownerId),displayName:str(body.displayName),
