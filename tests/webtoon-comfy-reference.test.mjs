@@ -77,3 +77,12 @@ test('art prompt includes character acting but never embeds LLM-written dialogue
  assert.ok(!prompt.includes('안녕하세요!'))
  assert.ok(prompt.includes('negative space'))
 })
+test('image connected only as a post-processing overlay is not accepted as a character conditioning reference',()=>{
+ const wf=workflow()
+ wf['11']={class_type:'LoadImage',inputs:{image:'unbound.png'}}
+ wf['12']={class_type:'ImageComposite',inputs:{background:['9',0],overlay:['11',0]}}
+ wf['10'].inputs.images=['12',0]
+ assert.throws(()=>bindReferenceNodes(wf,good(),{
+   'identity:hero':'11',continuity:'2'
+ }),/does not feed sampler model or text conditioning/)
+})
