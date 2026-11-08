@@ -111,11 +111,13 @@ export default function WebtoonStudio(){
       const res=await fetch(url,{cache:'no-store'})
       const reply=await res.json() as ApiReply
       if(!res.ok||!reply.ok)throw new Error(reply.error||'Project request failed')
-      if(id&&projectIdRef.current===id)setSnapshot(previous=>{
-        const incoming=reply.data as ProjectSnapshot
-        return previous?.projectId===id&&previous.revision>incoming.revision?previous:incoming
-      })
-      else setProjects(reply.data as ProjectListItem[])
+      if(id){
+        // Project responses from an earlier selection are ignored, not cast as a project list.
+        if(projectIdRef.current===id)setSnapshot(previous=>{
+          const incoming=reply.data as ProjectSnapshot
+          return previous?.projectId===id&&previous.revision>incoming.revision?previous:incoming
+        })
+      }else setProjects(reply.data as ProjectListItem[])
     }catch(e){setMessage(e instanceof Error?e.message:String(e))}
   },[projectId])
   useEffect(()=>{
