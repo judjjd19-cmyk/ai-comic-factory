@@ -405,7 +405,9 @@ export class ProjectStore {
     if(!magic)throw new Error('Wrong master image format')
     const ext=input.mime==='image/png'?'png':input.mime==='image/jpeg'?'jpg':'webp'
     const sha=hash(bytes)
-    const id='master_'+createHash('sha256').update(input.ownerId+input.kind+sha).digest('hex').slice(0,40)
+    const id='master_'+createHash('sha256').update(JSON.stringify([
+      input.ownerId,input.kind,input.outfitId||'',input.view||'',sha
+    ])).digest('hex').slice(0,40)
     return this.modify(projectId,rev,async snapshot=>{
       if(snapshot.catalog.assets.some(a=>a.id===id))throw new Error('Master draft already exists')
       if(input.kind==='identity'&&snapshot.catalog.characters.some(c=>c.id===input.ownerId))

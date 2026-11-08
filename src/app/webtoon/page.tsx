@@ -293,9 +293,11 @@ export default function WebtoonStudio(){
   useEffect(()=>{
     if(!authorized||!projectId||busy||pollFailed||!lastPair)return
     const status=lastPair.job.status
-    if(status!=='rendering_first'&&status!=='rendering_second')return
+    const orphanFirst=status==='review_first'&&!assetForPanel(lastPair.plan.panels[0].id)
+    const orphanSecond=status==='review_second'&&!assetForPanel(lastPair.plan.panels[1].id)
+    if(status!=='rendering_first'&&status!=='rendering_second'&&!orphanFirst&&!orphanSecond)return
     const pairId=lastPair.plan.id
-    const index:0|1=status==='rendering_first'?0:1
+    const index:0|1=(status==='rendering_first'||orphanFirst)?0:1
     let disposed=false
     const timer=setInterval(()=>{
       if(renderPollingRef.current)return
@@ -666,6 +668,25 @@ export default function WebtoonStudio(){
           </div>
           <div className="space-y-2">
             {generated&&<img className="h-52 object-contain border rounded" src={generated} alt="생성된 캐릭터 초안"/>}
+            {snapshot.catalog.assets.some(a=>a.status==='draft'&&a.kind!=='previous-panel')&&<>
+              <label className="text-xs font-medium block">저장된 기준 이미지 초안 (새로고침 후에도 재선택 가능)</label>
+              <select className="border rounded p-2 w-full text-sm" value={draftId} onChange={e=>{
+                const chosen=snapshot.catalog.assets.find(a=>a.id===e.target.value)
+                setDraftId(e.target.value);setReviewCheck(false)
+                if(chosen){
+                  setOwnerId(chosen.ownerId)
+                  setKind(chosen.kind as 'identity'|'location'|'view'|'outfit')
+                  if(chosen.outfitId)setOutfitId(chosen.outfitId)
+                  if(chosen.view)setView(chosen.view)
+                }
+              }}>
+                <option value="">검수할 저장 초안 선택</option>
+                {snapshot.catalog.assets.filter(a=>a.status==='draft'&&a.kind!=='previous-panel')
+                  .map(a=><option key={a.id} value={a.id}>
+                    {a.kind} · {a.ownerId} · {a.outfitId||a.view||a.id.slice(-8)}
+                  </option>)}
+              </select>
+            </>}
             {draftId&&selectedMasterDraft&&<>
               <img className="h-52 object-contain border rounded" src={assetUrl(projectId,draftId)} alt="승인할 기준 이미지"/>
               <p className="text-xs break-all">{selectedMasterDraft.kind}: {draftId}</p>
