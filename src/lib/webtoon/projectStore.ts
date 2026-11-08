@@ -21,6 +21,11 @@ import {
   type ReferenceAsset,
 } from './contracts.ts'
 
+export interface MasterGenerationJob {
+  promptId:string;ownerId:string;kind:'identity'|'location'|'view'|'outfit'
+  outfitId?:string;view?:import('./contracts.ts').Facing
+  description:string;createdAt:string;status:'pending'|'staged'
+}
 export interface PairRecord { plan: PairPlan; job: PairJob }
 export interface ProjectSnapshot {
   schemaVersion: 1
@@ -33,6 +38,7 @@ export interface ProjectSnapshot {
   bubbleOverrides?: Record<string, Record<string, {text:string;box:[number,number,number,number]}>>
   rejections?: Array<{panelId:string;assetId:string;reason:string;at:string}>
   draftCasting?: CastProposals
+  masterJobs?: MasterGenerationJob[]
   series?: SeriesLedger
 }
 
@@ -390,10 +396,29 @@ export class ProjectStore {
     const bytes=await this.verifiedAsset(projectId,asset)
     return{asset,bytes,mime:asset.uri.endsWith('.png')?'image/png':asset.uri.endsWith('.jpg')?'image/jpeg':'image/webp'}
   }
+  async recordMasterJob(projectId:string,rev:number,input:Omit<MasterGenerationJob,'status'|'createdAt'>):Promise<ProjectSnapshot>{
+    assertId(input.ownerId)
+    if(!/^[a-zA-Z0-9_-]{6,128}$/.test(input.promptId))
+      throw Error('Invalid ComfyUI master prompt ID')
+    if(!['identity','location','view','outfit'].includes(input.kind))
+      throw Error('Invalid master job kind')
+    if(input.kind==='view'&&!input.view)throw Error('View angle required')
+    if(input.kind==='outfit'&&!input.outfitId)throw Error('Outfit ID required')
+    if(input.outfitId)assertId(input.outfitId)
+    if(!input.description.trim()||input.description.length>1800)throw Error('Master description required')
+    return this.modify(projectId,rev,snapshot=>{
+      snapshot.masterJobs ||= []
+      if(snapshot.masterJobs.some(job=>job.promptId===input.promptId))
+        throw Error('Duplicate master prompt ID')
+      snapshot.masterJobs.push({...input,description:input.description.trim(),
+        createdAt:new Date().toISOString(),status:'pending'})
+    })
+  }
+
   async stageMaster(projectId:string,rev:number,input:{
     ownerId:string;kind:'identity'|'location'|'outfit'|'view';image:Buffer;
     mime:'image/png'|'image/jpeg'|'image/webp';outfitId?:string;
-    view?:import('./contracts.ts').Facing
+    view?:import('./contracts.ts').Facing;promptId?:string
   }):Promise<ProjectSnapshot>{
     assertId(input.ownerId)
     if(input.outfitId)assertId(input.outfitId)
@@ -428,6 +453,14 @@ export class ProjectStore {
       snapshot.catalog.assets.push({id,kind:input.kind,ownerId:input.ownerId,uri:'refs/'+sha+'.'+ext,
         status:'draft',version:character?.version||1,sha256:sha,
         ...(input.outfitId?{outfitId:input.outfitId}:{}),...(input.view?{view:input.view}:{})})
+      if(input.promptId){
+        const job=snapshot.masterJobs?.find(job=>job.promptId===input.promptId&&job.status==='pending')
+        if(!job||job.ownerId!==input.ownerId||job.kind!==input.kind||
+          (job.view||'')!==(input.view||'')||
+          (job.outfitId||'')!==(input.outfitId||''))
+          throw Error('Master job identity/angle does not match the submitted image')
+        job.status='staged'
+      }
     })
   }
   async approveCharacter(projectId:string,rev:number,assetId:string,input:{
