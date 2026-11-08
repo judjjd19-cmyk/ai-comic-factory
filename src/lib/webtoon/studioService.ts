@@ -236,3 +236,12 @@ export async function nextPlannedWebtoonPair(projectId:string,episodeId:string){
 export async function savedWebtoonEpisodeDrafts(projectId:string,episodeId:string){
   return readEpisodeDrafts(projectId,episodeId)
 }
+
+export async function planOneWebtoonPairStep(projectId:string,episodeId:string,storyGoal:string,storyBible:string,
+  pairCount:number,locationId?:string){
+  return generateEpisodeDrafts({projectId,episodeId,storyGoal,storyBible,pairCount,locationId,maxNewPairs:1},
+    ({systemPrompt,userPrompt,maxNewTokens})=>predict({
+      systemPrompt,userPrompt,nbMaxNewTokens:maxNewTokens,
+      llmVendorConfig:{vendor:'SERVER',apiKey:'',modelId:''}
+    }),store)
+}
