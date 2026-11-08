@@ -155,6 +155,12 @@ export class ProjectStore {
   async appendPair(projectId: string, expectedRevision: number, plan: PairPlan): Promise<ProjectSnapshot> {
     return this.modify(projectId, expectedRevision, snapshot => {
       if (snapshot.pairs.some(item => item.plan.id === plan.id)) throw new Error('Duplicate pair ID')
+      const existingPanelIds=new Set(snapshot.pairs.flatMap(p=>p.plan.panels.map(panel=>panel.id)))
+      if(plan.panels.some(panel=>existingPanelIds.has(panel.id)))
+        throw Error('Panel ID collides with an earlier episode or pair')
+      if(snapshot.series?.episodes.length&&
+        (plan.panels[0].id!==plan.id+'_0'||plan.panels[1].id!==plan.id+'_1'))
+        throw Error('Series panel IDs must be deterministically scoped to their pair')
       const previous = snapshot.pairs.at(-1)
       if (previous) {
         if (previous.job.status !== 'approved') throw new Error('Previous pair is not approved')

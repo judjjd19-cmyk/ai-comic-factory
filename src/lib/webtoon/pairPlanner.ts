@@ -123,6 +123,15 @@ export function decodePairPlan(text: string, input: PairPlannerInput): PairPlan 
     panels: [value.panels[0], value.panels[1]],
   }
   const issues = validatePairPlan(draft, input.catalog)
+  // Series-mode panel IDs are deterministic and scoped to the episode/pair.
+  // The legacy Comic Factory path keeps its existing ID format.
+  if (input.pairId.startsWith(input.episodeId + '_p')) {
+    for (const index of [0, 1] as const) {
+      if (draft.panels[index].id !== input.pairId + '_' + index)
+        issues.push({code:'PANEL_IDENTITY',path:'panels.'+index+'.id',
+          message:'Panel IDs must equal pairId + _0 or _1'})
+    }
+  }
   if (issues.length) throw new PairPlanValidationError(issues)
   return draft
 }
