@@ -180,7 +180,7 @@ export async function planWebtoonPair(projectId:string,storyGoal:string,episodeI
     const previous=current.series?.episodes.at(-1)
     if(previous&&previous.status!=='completed')throw Error('Complete the preceding episode before starting another')
     current=await store.beginEpisode(projectId,current.revision,{
-      episodeId,targetPairs:10,startState:initial
+      episodeId,targetPairs:10,startState:last?.plan.after||initial
     })
   }
   return store.appendPair(projectId,current.revision,plan)
