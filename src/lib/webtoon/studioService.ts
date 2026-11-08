@@ -110,9 +110,13 @@ export async function approveWebtoonLocation(projectId:string,revision:number,as
 export async function approveWebtoonSupplement(projectId:string,revision:number,assetId:string){
   return store.approveSupplementalReference(projectId,revision,assetId)
 }
-export async function generateMasterImage(prompt:string,width=768,height=1024){
+export async function generateMasterImage(prompt:string,width=768,height=1024,
+  kind:'identity'|'location'='identity'){
   if(!prompt.trim()||prompt.length>1600)throw new Error('Master prompt length invalid')
-  return submitComfyUI('single character design sheet, consistent appearance, no text; '+prompt,width,height)
+  const instructions=kind==='location'
+    ?'empty recurring webtoon location background reference, stable architectural layout, fixed furnishings, lighting and perspective, no characters, no lettering; '
+    :'single canonical character identity reference, recognizable face, consistent hairstyle and eye color, neutral pose, no additional characters, no lettering; '
+  return submitComfyUI(instructions+prompt,width,height)
 }
 export async function pollMasterImage(promptId:string){return pollComfyUI(promptId)}
 /** A submitted master prompt becomes a recoverable project job before UI polling. */
@@ -123,7 +127,7 @@ export async function queueWebtoonMaster(projectId:string,ownerId:string,
   if(!['identity','location','view','outfit'].includes(kind))throw Error('Invalid master kind')
   const output=(kind==='view'||kind==='outfit')
     ?await generateCharacterReference(projectId,ownerId,kind,description,view,width,height)
-    :await generateMasterImage(description,width,height)
+    :await generateMasterImage(description,width,height,kind)
   if(!output.renderId||output.status!=='pending')throw Error('ComfyUI master job was not queued')
   const snapshot=await store.read(projectId)
   const recorded=await store.recordMasterJob(projectId,snapshot.revision,{
