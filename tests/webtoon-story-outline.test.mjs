@@ -25,3 +25,11 @@ test('LLM repairs invalid outline but never fakes an outline after two failures'
  assert.equal(count,2);assert.equal(result.beats[4].stage,'hook')
  await assert.rejects(designEpisodeOutline('ep1','사건','',catalog,async()=>'{bad'),/valid JSON/)
 })
+
+test('episode pacing recommendation is validated and measured in two-panel pairs',()=>{
+ const payload=JSON.parse(response())
+ payload.recommendedPairs=24
+ assert.equal(parseEpisodeOutline(JSON.stringify(payload),'ep1',catalog).recommendedPairs,24)
+ payload.recommendedPairs=251
+ assert.throws(()=>parseEpisodeOutline(JSON.stringify(payload),'ep1',catalog),/recommendedPairs/)
+})

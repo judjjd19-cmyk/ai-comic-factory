@@ -1,7 +1,7 @@
 import type {WebtoonCatalog} from './contracts.ts'
 export type StoryStage='opening'|'inciting'|'escalation'|'climax'|'hook'
 export interface StageBeat{stage:StoryStage;event:string;characterIds:string[];locationId:string;emotionalChange:string}
-export interface EpisodeOutline{episodeId:string;theme:string;stakes:string;beats:StageBeat[]}
+export interface EpisodeOutline{episodeId:string;theme:string;stakes:string;beats:StageBeat[];recommendedPairs?:number}
 export interface OutlineMessages{systemPrompt:string;userPrompt:string;maxNewTokens:number}
 const ID=/^[A-Za-z0-9][A-Za-z0-9_-]{0,79}$/
 const stages:StoryStage[]=['opening','inciting','escalation','climax','hook']
@@ -15,6 +15,10 @@ export function parseEpisodeOutline(raw:string,episodeId:string,catalog:WebtoonC
   catch{throw Error('Outline response must be valid JSON')}
   if(!rec(value)||value.episodeId!==episodeId||!str(value.theme)||!str(value.stakes)||
     !Array.isArray(value.beats)||value.beats.length!==5)throw Error('Expected five episode beats')
+  const recommendedPairs=value.recommendedPairs
+  if(recommendedPairs!==undefined&&(!Number.isInteger(recommendedPairs)||
+    (recommendedPairs as number)<1||(recommendedPairs as number)>250))
+    throw Error('recommendedPairs must be between 1 and 250')
   const people=new Set(catalog.characters.map(c=>c.id))
   const places=new Set(catalog.locations.map(l=>l.id))
   const beats:StageBeat[]=value.beats.map((v:unknown,i:number)=>{
@@ -27,7 +31,8 @@ export function parseEpisodeOutline(raw:string,episodeId:string,catalog:WebtoonC
       emotionalChange:v.emotionalChange.trim().slice(0,300),
       characterIds:v.characterIds as string[],locationId:v.locationId}
   })
-  return{episodeId,theme:value.theme.trim().slice(0,500),stakes:value.stakes.trim().slice(0,1000),beats}
+  return{episodeId,theme:value.theme.trim().slice(0,500),stakes:value.stakes.trim().slice(0,1000),beats,
+    ...(recommendedPairs===undefined?{}:{recommendedPairs:recommendedPairs as number})}
 }
 export function outlineMessages(episodeId:string,premise:string,bible:string,catalog:WebtoonCatalog):OutlineMessages{
   if(!ID.test(episodeId)||!premise.trim()||premise.length>5000||bible.length>15000)
@@ -39,7 +44,9 @@ export function outlineMessages(episodeId:string,premise:string,bible:string,cat
       'Preserve premise, character and location identities; never introduce unregistered IDs.',
       'Exactly five ordered beats: opening, inciting, escalation, climax, hook.',
       'Create compelling causality, stakes and an ending hook, without repeating a beat.',
-      'Return one JSON object only: episodeId, theme, stakes, beats.',
+      'Return one JSON object only: episodeId, theme, stakes, beats, recommendedPairs.',
+      'recommendedPairs is the number of TWO-PANEL pairs (1..250), selected for pacing, scroll length and narrative density.',
+      'Favor enough panels for visual storytelling, reactions and scene transitions; do not pad scenes with filler.',
       'Every beat has stage, event, characterIds, locationId, emotionalChange.'
     ].join('\n'),
     userPrompt:JSON.stringify({episodeId,premise,bible,

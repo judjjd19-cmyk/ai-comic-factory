@@ -696,7 +696,7 @@ export default function WebtoonStudio(){
           <div className="flex flex-wrap items-center gap-3">
             <button className="border rounded px-3 py-2 disabled:opacity-40" disabled={busy}
               onClick={()=>void run('designEpisodeOutline',{episodeId,storyGoal,storyBibleSummary:storyBible},
-                data=>setEpisodeOutline(data.outline))}>
+                data=>{setEpisodeOutline(data.outline);if(data.outline?.recommendedPairs)setEpisodePairs(data.outline.recommendedPairs)})}>
               LLM 회차 기승전결·클리프행어 설계
             </button>
             <button className="underline text-sm" disabled={busy}
@@ -707,6 +707,7 @@ export default function WebtoonStudio(){
           {episodeOutline&&<div className="space-y-2 text-sm">
             <p><strong>주제:</strong> {episodeOutline.theme}</p>
             <p><strong>갈등·위험:</strong> {episodeOutline.stakes}</p>
+            {episodeOutline.recommendedPairs&&<p><strong>LLM 권장 길이:</strong> {episodeOutline.recommendedPairs*2}컷 · {episodeOutline.recommendedPairs}쌍 (직접 조정 가능)</p>}
             {episodeOutline.beats?.map((beat:any)=><p key={beat.stage} className="border-l-2 pl-3">
               <strong>{beat.stage}</strong> · {beat.event} ({beat.emotionalChange})
             </p>)}
