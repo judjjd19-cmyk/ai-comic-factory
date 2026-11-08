@@ -174,3 +174,21 @@ test('long serial memory always retains open thread IDs in valid JSON',()=>{
  assert.equal(parsed.unresolvedThreads[14].id,'thread_14')
  assert(serialized.length<7301)
 })
+
+test('editing first dialogue after second panel approval requires a continuity check',()=>env(async store=>{
+ await generateEpisodeDrafts({projectId:'serial',episodeId:'episode1',
+   storyGoal:'한 쌍 대화',storyBible:'',pairCount:1},llm,store)
+ let state=await completePair(store,'episode1')
+ const first=state.pairs[0].plan.panels[0]
+ state=await store.setBubble('serial',state.revision,first.id,first.bubbles[0].id,
+   '첫 컷의 말이 달라졌다',[.65,.03,.3,.2])
+ assert.equal(state.series.episodes[0].continuityReviewRequired,true)
+ await assert.rejects(store.finalizeEpisode('serial',state.revision,'episode1',{
+   summary:'수정됨',endingHook:'마무리',openThreads:[],resolveThreadIds:[]
+ }),/Downstream story continuity/)
+ state=await store.acknowledgeEpisodeContinuity('serial',state.revision,'episode1','reviewer')
+ state=await store.finalizeEpisode('serial',state.revision,'episode1',{
+   summary:'수정됨',endingHook:'마무리',openThreads:[],resolveThreadIds:[]
+ })
+ assert.equal(state.series.episodes[0].status,'completed')
+}))

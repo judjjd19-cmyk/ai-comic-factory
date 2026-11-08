@@ -7,9 +7,13 @@ export function buildAutoIPAdapter(workflow:ComfyWorkflow,refs:UploadedReference
   clipFile='CLIP-ViT-H-14-laion2B-s32B-b79K.safetensors'){
   if(!refs.length)throw Error('At least one approved identity reference required')
   const clone:ComfyWorkflow=structuredClone(workflow)
-  const samplers=Object.entries(clone).filter(([,n])=>n.class_type==='KSampler')
-  if(samplers.length!==1)throw Error('Expected exactly one KSampler')
-  const sampler=samplers[0][1]
+  const samplers=Object.entries(clone).filter(([,n])=>
+    n.class_type==='KSampler'||n.class_type==='KSamplerAdvanced')
+  const requested=process.env.COMFYUI_SAMPLER_NODE_ID
+  const selected=requested?samplers.find(([id])=>id===requested):
+    samplers.length===1?samplers[0]:undefined
+  if(!selected)throw Error('Expected exactly one KSampler or a configured COMFYUI_SAMPLER_NODE_ID')
+  const sampler=selected[1]
   if(!Array.isArray(sampler.inputs.model))throw Error('Sampler model link missing')
   const prefix='webtoon_ip_'
   if(Object.keys(clone).some(k=>k.startsWith(prefix)))throw Error('Reserved node ID collision')
@@ -24,7 +28,7 @@ export function buildAutoIPAdapter(workflow:ComfyWorkflow,refs:UploadedReference
       throw Error('Region reference does not belong to visible actor: '+ref.assetId)
     if(!/^[\w .()\/-]+\.(png|jpg|jpeg|webp)$/i.test(ref.image)||ref.image.includes('..'))
       throw Error('Unsafe uploaded reference filename')
-    clone[base+'_image']={class_type:'LoadImage',inputs:{image:ref.image,upload:'image'}}
+    clone[base+'_image']={class_type:'LoadImage',inputs:{image:ref.image}}
     const weight={identity:0.75,view:0.35,outfit:0.45,location:0.22,continuity:0.28}[ref.purpose]
     const inputs:Record<string,unknown>={model,ipadapter:[prefix+'model',0],image:[base+'_image',0],
       clip_vision:[prefix+'vision',0],weight,weight_type:'linear',combine_embeds:'concat',

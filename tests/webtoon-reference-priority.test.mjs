@@ -26,3 +26,16 @@ test('previous panels from other scenes are not used as identity or scene refere
  const refs=selectReferences(panel,catalog,{...previous,sceneId:'elsewhere'},4)
  assert.deepEqual(refs.map(x=>x.purpose),['identity','identity','location','outfit'])
 })
+
+test('latest approved outfit/view revision is used without changing the identity anchor',()=>{
+ const expanded=structuredClone(catalog)
+ expanded.assets.push(asset('a_outfit_new','outfit','a',{outfitId:'default'}))
+ expanded.assets.push(asset('a_front_old','view','a',{view:'front'}))
+ expanded.assets.push(asset('a_front_new','view','a',{view:'front'}))
+ const chosen=selectReferences(panel,expanded,undefined,8)
+ assert(chosen.some(r=>r.assetId==='a_id'&&r.purpose==='identity'))
+ assert(chosen.some(r=>r.assetId==='a_outfit_new'&&r.purpose==='outfit'))
+ assert(!chosen.some(r=>r.assetId==='a_outfit'))
+ assert(chosen.some(r=>r.assetId==='a_front_new'&&r.purpose==='view'))
+ assert(!chosen.some(r=>r.assetId==='a_front_old'))
+})

@@ -74,6 +74,7 @@ export default function WebtoonStudio(){
   const [draftId,setDraftId]=useState('')
   const [generated,setGenerated]=useState('')
   const [masterPromptId,setMasterPromptId]=useState('')
+  const [masterReadyPromptId,setMasterReadyPromptId]=useState('')
   const [masterContext,setMasterContext]=useState<{
     ownerId:string;kind:'identity'|'location'|'view'|'outfit';view:string;outfitId:string
   }|null>(null)
@@ -98,6 +99,9 @@ export default function WebtoonStudio(){
   const renderPollingRef=useRef(false)
   const masterPollingRef=useRef(false)
   const autoActionRef=useRef('')
+  const bubbleQueueRef=useRef<Promise<void>>(Promise.resolve())
+  const projectIdRef=useRef(projectId)
+  useEffect(()=>{projectIdRef.current=projectId},[projectId])
   const [pollFailed,setPollFailed]=useState(false)
   const cancelPlanningRef=useRef(false)
 
@@ -107,8 +111,13 @@ export default function WebtoonStudio(){
       const res=await fetch(url,{cache:'no-store'})
       const reply=await res.json() as ApiReply
       if(!res.ok||!reply.ok)throw new Error(reply.error||'Project request failed')
-      if(id)setSnapshot(reply.data as ProjectSnapshot)
-      else setProjects(reply.data as ProjectListItem[])
+      if(id){
+        // Project responses from an earlier selection are ignored, not cast as a project list.
+        if(projectIdRef.current===id)setSnapshot(previous=>{
+          const incoming=reply.data as ProjectSnapshot
+          return previous?.projectId===id&&previous.revision>incoming.revision?previous:incoming
+        })
+      }else setProjects(reply.data as ProjectListItem[])
     }catch(e){setMessage(e instanceof Error?e.message:String(e))}
   },[projectId])
   useEffect(()=>{
@@ -128,13 +137,18 @@ export default function WebtoonStudio(){
     finally{setBusy(false)}
   }
 
+  const applySnapshot=(incoming:ProjectSnapshot)=>{
+    if(projectIdRef.current && incoming.projectId!==projectIdRef.current)return
+    setSnapshot(previous=>previous?.projectId===incoming.projectId&&
+      previous.revision>incoming.revision?previous:incoming)
+  }
   const run=async(action:string,params:Record<string,unknown>={},onDone?:(data:any)=>void)=>{
     if(busy)return
     setBusy(true);setMessage(action+' 실행 중')
     try{
       const data=await request(action,{...(projectId?{projectId}:{}),...params})
-      if(data?.catalog&&data?.pairs)setSnapshot(data as ProjectSnapshot)
-      else if(data?.snapshot?.catalog)setSnapshot(data.snapshot as ProjectSnapshot)
+      if(data?.catalog&&data?.pairs)applySnapshot(data as ProjectSnapshot)
+      else if(data?.snapshot?.catalog)applySnapshot(data.snapshot as ProjectSnapshot)
       if(onDone)onDone(data)
       setMessage(action+' 완료')
       if(action==='create')await refresh('')
@@ -158,34 +172,50 @@ export default function WebtoonStudio(){
     setStoryBible(snapshot.story.bible)
     setLoadedStoryVersion(key)
   },[snapshot?.projectId,snapshot?.story?.version,loadedStoryVersion])
+  useEffect(()=>{
+    if(snapshot?.draftCasting)setCastSuggestions(snapshot.draftCasting)
+  },[snapshot?.projectId,snapshot?.draftCasting])
   const assetForPanel=(panelId:string)=>snapshot?.catalog.assets.filter(a=>
-    a.kind==='previous-panel'&&a.ownerId===panelId&&a.status!=='rejected').at(-1)
-  const saveBubble=async(panelId:string,bubble:BubblePlan,text:string,box=bubble.box)=>{
-    if(!snapshot)return
-    await run('editBubble',{panelId,bubbleId:bubble.id,text,box})
+    a.kind==='previous-panel'&&a.ownerId===panelId&&(a.status==='draft'||a.status==='approved')).at(-1)
+  const saveBubble=(panelId:string,bubble:BubblePlan,text:string,box=bubble.box)=>{
+    const target=projectId
+    if(!target)return
+    // Do not silently discard blur events while another request is running.
+    // Serialized edits avoid overwriting one dialogue with an older response.
+    bubbleQueueRef.current=bubbleQueueRef.current.catch(()=>{}).then(async()=>{
+      const data=await request('editBubble',{projectId:target,panelId,bubbleId:bubble.id,text,box})
+      if(projectIdRef.current===target)applySnapshot(data)
+    }).catch(error=>{
+      if(projectIdRef.current===target)
+        setMessage('말풍선 저장 실패: '+(error instanceof Error?error.message:String(error)))
+    })
   }
   const stageMaster=async()=>{
     if(!snapshot)return
     let dataUri=''
     if(generated && masterContext &&
        (masterContext.ownerId!==ownerId||masterContext.kind!==kind||
-        masterContext.view!==view||masterContext.outfitId!==outfitId)){
+        (kind==='view'&&masterContext.view!==view)||
+        ((kind==='outfit'||kind==='identity')&&masterContext.outfitId!==outfitId))){
       setMessage('생성된 원본의 캐릭터·종류가 변경됐어. 해당 원본의 설정으로 되돌리거나 다시 생성해.')
       return
     }
     try{dataUri=generated||await fileData(file as File)}
     catch(e){setMessage(e instanceof Error?e.message:String(e));return}
-    await run('stageMaster',{revision:snapshot.revision,ownerId,kind,outfitId,view,dataUri},data=>{
+    await run('stageMaster',{revision:snapshot.revision,ownerId,kind,outfitId,view,dataUri,
+      promptId:generated?masterReadyPromptId:undefined},data=>{
       const latest=data.catalog.assets.at(-1)
       if(latest)setDraftId(latest.id)
-      setReviewCheck(false)
+      setMasterReadyPromptId('');setMasterPromptId('')
+      setGenerated('');setReviewCheck(false)
     })
   }
   const approveMaster=async()=>{
     if(!snapshot||!selectedMasterDraft||!reviewCheck)return
     const action=selectedMasterDraft.kind==='identity'?'approveCharacter':selectedMasterDraft.kind==='location'?'approveLocation':'approveSupplement'
     await run(action,{revision:snapshot.revision,assetId:draftId,ownerId,displayName,
-      description,outfitId},()=>{setDraftId('');setGenerated('');setFile(null);setMasterContext(null);setMasterPromptId('');setReviewCheck(false)})
+      description,outfitId},()=>{setDraftId('');setGenerated('');setFile(null);setMasterContext(null);
+      setMasterPromptId('');setMasterReadyPromptId('');setReviewCheck(false)})
   }
   const planPair=async()=>{
     if(!snapshot)return
@@ -215,7 +245,7 @@ export default function WebtoonStudio(){
   }
   const activateDraft=async()=>{
     await run('activateDraft',{episodeId},data=>{
-      if(data.snapshot)setSnapshot(data.snapshot)
+      if(data.snapshot)applySnapshot(data.snapshot)
       setRemainingDrafts(data.remaining)
     })
   }
@@ -283,6 +313,14 @@ export default function WebtoonStudio(){
     setPollFailed(false)
     await run('startPanel',{pairId,panelIndex:index})
   }
+  const resetRender=async(pairId:string,index:0|1)=>{
+    await run('resetPanelTask',{pairId,panelIndex:index,
+      reason:'ComfyUI interrupted or an earlier image job is no longer available'},()=>{
+        // Hold polling until a replacement task has actually been submitted.
+        setPollFailed(true)
+        setMessage('기존 작업을 보관했어. 해당 컷 작업을 다시 제출해.')
+      })
+  }
   const pollRender=async(pairId:string,index:0|1)=>{
     await run('pollPanel',{pairId,panelIndex:index},result=>{
       if(result.status==='pending')setMessage('ComfyUI 렌더링 진행 중')
@@ -293,9 +331,11 @@ export default function WebtoonStudio(){
   useEffect(()=>{
     if(!authorized||!projectId||busy||pollFailed||!lastPair)return
     const status=lastPair.job.status
-    if(status!=='rendering_first'&&status!=='rendering_second')return
+    const orphanFirst=status==='review_first'&&!assetForPanel(lastPair.plan.panels[0].id)
+    const orphanSecond=status==='review_second'&&!assetForPanel(lastPair.plan.panels[1].id)
+    if(status!=='rendering_first'&&status!=='rendering_second'&&!orphanFirst&&!orphanSecond)return
     const pairId=lastPair.plan.id
-    const index:0|1=status==='rendering_first'?0:1
+    const index:0|1=(status==='rendering_first'||orphanFirst)?0:1
     let disposed=false
     const timer=setInterval(()=>{
       if(renderPollingRef.current)return
@@ -305,7 +345,7 @@ export default function WebtoonStudio(){
           if(disposed)return
           if(data.status==='review'){
             setPollFailed(false)
-            if(data.snapshot)setSnapshot(data.snapshot)
+            if(data.snapshot)applySnapshot(data.snapshot)
             else await refresh(projectId)
             setMessage('작화 완료. 원본·대사·인물 일치를 검수한 뒤 승인해.')
           }else if(data.status==='error'){
@@ -329,6 +369,7 @@ export default function WebtoonStudio(){
           if(cancelled)return
           if(data.status==='completed'&&data.assetUrl){
             setGenerated(data.assetUrl)
+            setMasterReadyPromptId(masterPromptId)
             setMasterPromptId('')
             setMessage('기준 이미지 초안 생성 완료. 이미지 확인 후 등록·승인해.')
           }else if(data.status==='error'){
@@ -602,13 +643,13 @@ export default function WebtoonStudio(){
             {t.id} · {t.description} (처음: {t.introducedEpisode})
           </p>)}
         </div>}
-      </section>
+      </section>}
       {snapshot&&<section className="rounded-xl bg-white p-4 space-y-3">
         <h2 className="font-bold text-xl">2. 스토리에서 주요 인물·장소 초안 제안</h2>
         <p className="text-sm text-stone-600">LLM이 캐릭터 외형과 주요 장소를 제안해. 아래 제안은 아직 기준 이미지가 아니며, 이미지를 생성·확인·승인해야 고정 원본이 돼.</p>
         <button className="border rounded px-3 py-2 disabled:opacity-40" disabled={busy||!storyGoal.trim()}
           onClick={()=>void run('suggestCast',{storyGoal,storyBibleSummary:storyBible},
-            data=>setCastSuggestions(data as CastProposals))}>스토리 기반 주요 캐릭터·장소 설계</button>
+            data=>setCastSuggestions(data.draftCasting as CastProposals))}>스토리 기반 주요 캐릭터·장소 설계</button>
         {castSuggestions&&<div className="grid md:grid-cols-2 gap-3 text-sm">
           <div className="space-y-2">
             <h3 className="font-semibold">캐릭터 제안</h3>
@@ -649,23 +690,61 @@ export default function WebtoonStudio(){
               <option value="front">정면</option><option value="left">왼쪽</option>
               <option value="right">오른쪽</option><option value="back">후면</option></select>}
             <textarea className="border rounded p-2 w-full" placeholder="외형·장소 설명" value={description} onChange={e=>setDescription(e.target.value)} rows={3}/>
-            {kind==='identity'&&<input className="border rounded p-2 w-full" placeholder="의상 ID" value={outfitId} onChange={e=>setOutfitId(e.target.value)}/>}
-            <input type="file" accept="image/png,image/jpeg,image/webp" onChange={e=>{setFile(e.target.files?.[0]||null);setGenerated('');setMasterContext(null);setMasterPromptId('')}}/>
+            {(kind==='identity'||kind==='outfit')&&<input className="border rounded p-2 w-full" placeholder="의상 ID" value={outfitId} onChange={e=>setOutfitId(e.target.value)}/>}
+            <input type="file" accept="image/png,image/jpeg,image/webp" onChange={e=>{setFile(e.target.files?.[0]||null);setGenerated('');setMasterContext(null);
+              setMasterPromptId('');setMasterReadyPromptId('')}}/>
             <div className="flex gap-2 flex-wrap">
               <button className="border rounded px-3 py-2" disabled={busy}
-                onClick={()=>void run('generateMaster',{projectId,ownerId,kind,view,
+                onClick={()=>void run('generateMaster',{projectId,ownerId,kind,view,outfitId,
                   prompt:description,width:768,height:1024},
-                  data=>{setMasterPromptId(data.renderId);setMasterContext({ownerId,kind,view,outfitId});
+                  data=>{setMasterReadyPromptId('');setMasterPromptId(data.renderId);
+                    setMasterContext({ownerId,kind,view,outfitId});
                     setMessage('생성 작업: '+data.renderId)})}>AI로 원본 초안 생성</button>
               <button className="border rounded px-3 py-2" disabled={!masterPromptId||busy}
                 onClick={()=>void run('pollMaster',{promptId:masterPromptId},
-                  data=>{if(data.status==='completed')setGenerated(data.assetUrl);else setMessage('이미지 생성 중: '+data.status)})}>생성 결과 조회</button>
+                  data=>{if(data.status==='completed'){
+                    setGenerated(data.assetUrl);setMasterReadyPromptId(masterPromptId);setMasterPromptId('')
+                  }else setMessage('이미지 생성 중: '+data.status)})}>생성 결과 조회</button>
               <button className="border rounded px-3 py-2 bg-stone-900 text-white" disabled={busy||(!file&&!generated)}
                 onClick={()=>void stageMaster()}>이미지 초안 등록</button>
             </div>
           </div>
           <div className="space-y-2">
+            {snapshot.masterJobs?.some(job=>job.status==='pending')&&<>
+              <p className="font-medium text-sm">진행 중이던 이미지 생성 작업</p>
+              {snapshot.masterJobs.filter(job=>job.status==='pending').map(job=><button key={job.promptId}
+                disabled={busy} className="border rounded px-3 py-2 text-sm mr-2"
+                onClick={()=>{
+                  setOwnerId(job.ownerId);setKind(job.kind);setDescription(job.description)
+                  if(job.view)setView(job.view)
+                  if(job.outfitId)setOutfitId(job.outfitId)
+                  setMasterContext({ownerId:job.ownerId,kind:job.kind,
+                    view:job.view||view,outfitId:job.outfitId||outfitId})
+                  setGenerated('');setMasterReadyPromptId('');setMasterPromptId(job.promptId)
+                }}>
+                {job.kind} · {job.ownerId} 생성 작업 이어받기
+              </button>)}
+            </>}
             {generated&&<img className="h-52 object-contain border rounded" src={generated} alt="생성된 캐릭터 초안"/>}
+            {snapshot.catalog.assets.some(a=>a.status==='draft'&&a.kind!=='previous-panel')&&<>
+              <label className="text-xs font-medium block">저장된 기준 이미지 초안 (새로고침 후에도 재선택 가능)</label>
+              <select className="border rounded p-2 w-full text-sm" value={draftId} onChange={e=>{
+                const chosen=snapshot.catalog.assets.find(a=>a.id===e.target.value)
+                setDraftId(e.target.value);setReviewCheck(false)
+                if(chosen){
+                  setOwnerId(chosen.ownerId)
+                  setKind(chosen.kind as 'identity'|'location'|'view'|'outfit')
+                  if(chosen.outfitId)setOutfitId(chosen.outfitId)
+                  if(chosen.view)setView(chosen.view)
+                }
+              }}>
+                <option value="">검수할 저장 초안 선택</option>
+                {snapshot.catalog.assets.filter(a=>a.status==='draft'&&a.kind!=='previous-panel')
+                  .map(a=><option key={a.id} value={a.id}>
+                    {a.kind} · {a.ownerId} · {a.outfitId||a.view||a.id.slice(-8)}
+                  </option>)}
+              </select>
+            </>}
             {draftId&&selectedMasterDraft&&<>
               <img className="h-52 object-contain border rounded" src={assetUrl(projectId,draftId)} alt="승인할 기준 이미지"/>
               <p className="text-xs break-all">{selectedMasterDraft.kind}: {draftId}</p>
@@ -729,7 +808,7 @@ export default function WebtoonStudio(){
           <button className="rounded border px-4 py-2 disabled:opacity-40" disabled={busy||(lastPair&&lastPair.job.status!=='approved')}
             onClick={()=>void planPair()}>즉석 다음 2컷 계획</button>
         </div>
-        {remainingDrafts!==null&&<p className="text-sm">아직 활성화되지 않은 사전 콘티: {remainingDrafts}쌍</p>
+        {remainingDrafts!==null&&<p className="text-sm">아직 활성화되지 않은 사전 콘티: {remainingDrafts}쌍</p>}
         {lastPair&&<div className="border rounded p-3 text-sm">
           <strong>{lastPair.plan.id} · {lastPair.job.status}</strong>
           {lastPair.plan.panels.map((panel,i)=><p key={i}>{i+1}컷: {panel.summary} — {panel.characters.map(a=>a.action).join(', ')}</p>)}
@@ -742,15 +821,25 @@ export default function WebtoonStudio(){
           {(['validated','rendering_first'].includes(lastPair.job.status))&&
             <button className="rounded border px-3 py-2" disabled={busy}
               onClick={()=>void startRender(lastPair.plan.id,0)}>첫 컷 작업 제출 / 재개</button>}
-          {lastPair.job.status==='rendering_first'&&
+          {lastPair.job.status==='rendering_first'&&<>
             <button className="rounded border px-3 py-2" disabled={busy}
-              onClick={()=>void pollRender(lastPair.plan.id,0)}>첫 컷 상태 조회·검수 등록</button>}
+              onClick={()=>void pollRender(lastPair.plan.id,0)}>첫 컷 상태 조회·검수 등록</button>
+            <button className="rounded border border-amber-600 px-3 py-2" disabled={busy}
+              onClick={()=>void resetRender(lastPair.plan.id,0)}>
+              중단된 첫 컷 작업 초기화
+            </button>
+          </>}
           {(['first_approved','rendering_second'].includes(lastPair.job.status))&&
             <button className="rounded border px-3 py-2" disabled={busy}
               onClick={()=>void startRender(lastPair.plan.id,1)}>두 번째 컷 작업 제출 / 재개</button>}
-          {lastPair.job.status==='rendering_second'&&
+          {lastPair.job.status==='rendering_second'&&<>
             <button className="rounded border px-3 py-2" disabled={busy}
-              onClick={()=>void pollRender(lastPair.plan.id,1)}>두 번째 컷 상태 조회·검수 등록</button>}
+              onClick={()=>void pollRender(lastPair.plan.id,1)}>두 번째 컷 상태 조회·검수 등록</button>
+            <button className="rounded border border-amber-600 px-3 py-2" disabled={busy}
+              onClick={()=>void resetRender(lastPair.plan.id,1)}>
+              중단된 두 번째 컷 작업 초기화
+            </button>
+          </>}
         </div>
         {(['review_first','review_second'].includes(lastPair.job.status))&&<>
           <label className="flex gap-2 text-sm">

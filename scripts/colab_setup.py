@@ -145,6 +145,9 @@ def main() -> None:
         ensure_clone("https://github.com/cubiq/ComfyUI_IPAdapter_plus.git",
                      comfy / "custom_nodes/ComfyUI_IPAdapter_plus")
         execute(sys.executable, "-m", "pip", "install", "-r", str(comfy / "requirements.txt"))
+        adapter_requirements = comfy / "custom_nodes/ComfyUI_IPAdapter_plus/requirements.txt"
+        if adapter_requirements.is_file():
+            execute(sys.executable, "-m", "pip", "install", "-r", str(adapter_requirements))
         execute(sys.executable, "-m", "pip", "install", "huggingface_hub>=0.30,<2")
         execute("cmake", "-S", str(llama), "-B", str(llama / "build"),
                 "-DGGML_CUDA=ON", "-DCMAKE_BUILD_TYPE=Release")

@@ -79,6 +79,7 @@ export function buildPairMessages(input: PairPlannerInput, correction = ''): Pla
     'Speech bubble TEXT must be natural Korean dialogue. The image renderer must NEVER draw text: the editor will insert exact dialogue later.',
     'Each panel should advance the scene with visually renderable acting and consistent screen direction. No isolated illustrations.',
     'Return only JSON object with keys middle, after, panels. Do not rewrite before, masters, pair IDs or episode IDs.',
+    'Use EXACT panel IDs: first panel must equal pairId + "_0"; second panel must equal pairId + "_1". Any other IDs are invalid.',
     'Each panel must have id, sceneId, locationId, summary, camera, characters [{characterId,outfitId,action,emotion,box,facing}], bubbles [{id,type,speakerId,text,box,tailTarget,readOrder}], events [].',
     'Each state must have sceneId, locationId, timeKey, actors [{characterId,outfitId,box,facing,heldPropIds,emotion}].',
     'The speakerId is null only for narration bubbles. Types: speech, thought, narration. Events: character_enters, character_exits, outfit_change, scene_transition, prop_transfer, other.',

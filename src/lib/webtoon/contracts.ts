@@ -267,14 +267,14 @@ export function selectReferences(
       add(asset, 'location')
   }
   for (const actor of panel.characters) {
-    const outfit = catalog.assets.find(a => a.kind === 'outfit' && a.ownerId === actor.characterId &&
+    const outfit = catalog.assets.findLast(a => a.kind === 'outfit' && a.ownerId === actor.characterId &&
       a.status === 'approved' && a.uri && a.sha256 &&
       a.version === catalog.characters.find(c => c.id === actor.characterId)?.version &&
       a.outfitId === actor.outfitId)
     add(outfit, 'outfit', actor.characterId)
   }
   for (const actor of panel.characters) {
-    const view = catalog.assets.find(a => a.kind === 'view' && a.ownerId === actor.characterId &&
+    const view = catalog.assets.findLast(a => a.kind === 'view' && a.ownerId === actor.characterId &&
       a.view === actor.facing && a.version === catalog.characters.find(c => c.id === actor.characterId)?.version &&
       a.status === 'approved' && a.sha256)
     add(view, 'view', actor.characterId)

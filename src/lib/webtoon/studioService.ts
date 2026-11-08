@@ -17,7 +17,7 @@ import {predict} from '@/app/queries/predict'
 import {renderQueuedPanel} from '@/app/engine/renderQueuedPanel'
 import {pollComfyUI,submitComfyUI} from '@/app/engine/comfyui'
 import {generateEpisodeDrafts,activateNextEpisodeDraft,readEpisodeDrafts,initialScene,
-  saveEpisodeOutline} from './episodeDrafts'
+  saveEpisodeOutline,withSeriesPlanningLock,ensureNoOtherDraft} from './episodeDrafts'
 import {proposeCast} from './castPlanner'
 import {designEpisodeOutline} from './storyOutline'
 
@@ -90,12 +90,14 @@ export async function createWebtoonProject(projectId:string):Promise<ProjectSnap
 export async function listWebtoonProjects(){return store.listProjects()}
 export async function webtoonSnapshot(projectId:string){return store.read(projectId)}
 export async function stageWebtoonMaster(projectId:string,revision:number,ownerId:string,
-  kind:'identity'|'location'|'view'|'outfit',dataUri:string,outfitId?:string,view?:'front'|'left'|'right'|'back'){
+  kind:'identity'|'location'|'view'|'outfit',dataUri:string,outfitId?:string,view?:'front'|'left'|'right'|'back',promptId?:string){
   if(dataUri.length>28_000_000)throw new Error('Image exceeds upload limit')
   const match=/^data:(image\/png|image\/jpeg|image\/webp);base64,([A-Za-z0-9+/=]+)$/.exec(dataUri)
   if(!match)throw new Error('Expected a PNG, JPEG or WebP data URI')
   return store.stageMaster(projectId,revision,{ownerId,kind,mime:match[1] as 'image/png'|'image/jpeg'|'image/webp',
-    image:Buffer.from(match[2],'base64'),...(outfitId?{outfitId}:{}),...(kind==='view'&&view?{view}:{})})
+    image:Buffer.from(match[2],'base64'),
+    ...((kind==='identity'||kind==='outfit')&&outfitId?{outfitId}:{}),
+    ...(kind==='view'&&view?{view}:{}),...(promptId?{promptId}:{})})
 }
 export async function approveWebtoonCharacter(projectId:string,revision:number,assetId:string,
   details:{id:string;displayName:string;description:string;outfitId:string}){
@@ -108,11 +110,34 @@ export async function approveWebtoonLocation(projectId:string,revision:number,as
 export async function approveWebtoonSupplement(projectId:string,revision:number,assetId:string){
   return store.approveSupplementalReference(projectId,revision,assetId)
 }
-export async function generateMasterImage(prompt:string,width=768,height=1024){
+export async function generateMasterImage(prompt:string,width=768,height=1024,
+  kind:'identity'|'location'='identity'){
   if(!prompt.trim()||prompt.length>1600)throw new Error('Master prompt length invalid')
-  return submitComfyUI('single character design sheet, consistent appearance, no text; '+prompt,width,height)
+  const instructions=kind==='location'
+    ?'empty recurring webtoon location background reference, stable architectural layout, fixed furnishings, lighting and perspective, no characters, no lettering; '
+    :'single canonical character identity reference, recognizable face, consistent hairstyle and eye color, neutral pose, no additional characters, no lettering; '
+  return submitComfyUI(instructions+prompt,width,height)
 }
 export async function pollMasterImage(promptId:string){return pollComfyUI(promptId)}
+/** A submitted master prompt becomes a recoverable project job before UI polling. */
+export async function queueWebtoonMaster(projectId:string,ownerId:string,
+  kind:'identity'|'location'|'view'|'outfit',description:string,
+  outfitId?:string,view:'front'|'left'|'right'|'back'='front',width=768,height=1024){
+  safeId(projectId);safeId(ownerId)
+  if(!['identity','location','view','outfit'].includes(kind))throw Error('Invalid master kind')
+  const output=(kind==='view'||kind==='outfit')
+    ?await generateCharacterReference(projectId,ownerId,kind,description,view,width,height)
+    :await generateMasterImage(description,width,height,kind)
+  if(!output.renderId||output.status!=='pending')throw Error('ComfyUI master job was not queued')
+  const snapshot=await store.read(projectId)
+  const recorded=await store.recordMasterJob(projectId,snapshot.revision,{
+    promptId:output.renderId,ownerId,kind,description,
+    ...((kind==='identity'||kind==='outfit')&&outfitId?{outfitId}:{}),
+    ...(kind==='view'?{view}:{})
+  })
+  return{...output,snapshot:recorded}
+}
+
 /** Generate additional views/outfits from immutable approved identity, not free-running txt2img. */
 export async function generateCharacterReference(projectId:string,ownerId:string,kind:'view'|'outfit',
   description:string,view:'front'|'left'|'right'|'back'='front',width=768,height=1024){
@@ -148,7 +173,10 @@ export async function planWebtoonPair(projectId:string,storyGoal:string,episodeI
   locationId?:string,storyBibleSummary='',targetPairs=10):Promise<ProjectSnapshot>{
   if(!storyGoal.trim()||storyGoal.length>5000)throw new Error('Story goal must be provided')
   safeId(episodeId)
+  return withSeriesPlanningLock(projectId,async()=>{
   const snapshot=await store.read(projectId)
+  await ensureNoOtherDraft(projectId,episodeId,
+    new Set(snapshot.series?.episodes.filter(e=>e.status==='completed').map(e=>e.id)||[]))
   if(snapshot.catalog.characters.length<1)throw new Error('Register at least one character master')
   if(snapshot.catalog.locations.length<1)throw new Error('Register at least one location master')
   const last=snapshot.pairs.at(-1)
@@ -169,23 +197,19 @@ export async function planWebtoonPair(projectId:string,storyGoal:string,episodeI
     pairId,episodeId,storyGoal,storyBibleSummary,
     approvedHistorySummary:('CANONICAL_EPISODE_MEMORY: '+seriesNarrativeContext(snapshot.series)+'\n'+
       snapshot.pairs.slice(-8).map(p=>
-        p.plan.panels.map(x=>x.summary+' '+x.bubbles.map(b=>b.text).join(' ')).join(' / ')).join('\n')).slice(0,10000),
+        p.plan.panels.map(x=>x.summary+' '+x.bubbles.map(b=>
+          snapshot.bubbleOverrides?.[x.id]?.[b.id]?.text??b.text).join(' ')).join(' / ')).join('\n')).slice(0,10000),
     before:last?.plan.after||initial,catalog:snapshot.catalog
   }
   const plan:PairPlan=await generatePairPlan(input,({systemPrompt,userPrompt,maxNewTokens})=>predict({
     systemPrompt,userPrompt,nbMaxNewTokens:maxNewTokens,
     llmVendorConfig:{vendor:'SERVER',apiKey:'',modelId:''}
   }))
-  // Check revision again; no speculative plan may overwrite a concurrently approved pair.
-  let current=snapshot
-  if(!active){
-    const previous=current.series?.episodes.at(-1)
-    if(previous&&previous.status!=='completed')throw Error('Complete the preceding episode before starting another')
-    current=await store.beginEpisode(projectId,current.revision,{
-      episodeId,targetPairs,startState:last?.plan.after||initial
-    })
-  }
-  return store.appendPair(projectId,current.revision,plan)
+  // Beginning the episode and appending its first pair must commit in ONE manifest revision.
+  // A failed append cannot leave an empty active episode that blocks future work.
+  return store.appendPair(projectId,snapshot.revision,plan,
+    active?undefined:{targetPairs,startState:last?.plan.after||initial})
+  })
 }
 export async function startWebtoonPanel(projectId:string,pairId:string,panelIndex:0|1,width=768,height=1024){
   if(panelIndex!==0&&panelIndex!==1)throw new Error('Invalid panel index')
@@ -227,37 +251,68 @@ export async function startWebtoonPanel(projectId:string,pairId:string,panelInde
     }
   })
 }
+/** Explicit recovery when Colab/ComfyUI lost a prompt; never touches approved images. */
+export async function resetWebtoonPanelTask(projectId:string,pairId:string,panelIndex:0|1,reason:string){
+  if(!reason.trim()||reason.length>600)throw Error('A retry reason is required')
+  return withRenderTaskLock(projectId,pairId,panelIndex,async()=>{
+    const snapshot=await store.read(projectId)
+    const pair=snapshot.pairs.find(p=>p.plan.id===pairId)
+    const expected=panelIndex===0?'rendering_first':'rendering_second'
+    if(!pair||pair.job.status!==expected)
+      throw Error('Only an unapproved rendering job may be reset')
+    const task=await getTask(projectId,pairId,panelIndex)
+    if(!task)throw Error('No task to reset')
+    // The old Comfy job can still finish; its output is intentionally ignored.
+    // Keep a forensic record with promptId, attempt, metadata and reset reason.
+    const file=taskPath(projectId,pairId,panelIndex)
+    const archived=file+'.reset.'+randomUUID()
+    await rename(file,archived)
+    await writeFile(archived+'.reason.txt',reason.trim(),{flag:'wx'})
+    return{status:'reset',pairId,panelIndex,previousPromptId:task.promptId}
+  })
+}
 export async function pollWebtoonPanel(projectId:string,pairId:string,panelIndex:0|1){
-  const task=await getTask(projectId,pairId,panelIndex)
-  if(!task)throw new Error('No recorded ComfyUI job')
-  if(task.status==='submitting')return{status:'submitting'}
-  if(task.status==='failed')return{status:'error',error:task.error||'Previous render failed; press restart'}
-  let snapshot=await store.read(projectId)
-  const record=snapshot.pairs.find(p=>p.plan.id===pairId)
-  if(!record)throw new Error('Unknown pair')
-  const review=panelIndex===0?'review_first':'review_second'
-  if(record.job.status===review)return{status:'review',snapshot}
-  const expected=panelIndex===0?'rendering_first':'rendering_second'
-  if(record.job.status!==expected)throw new Error('Unexpected pair state '+record.job.status)
-  const result=await pollComfyUI(task.promptId)
-  if(result.status==='error'){
-    await saveTask(projectId,{...task,status:'failed',error:result.error||'ComfyUI failed'},true)
-    return{status:'error',error:result.error}
-  }
-  if(result.status!=='completed')return{status:result.status,error:result.error}
-  const match=/^data:(image\/png|image\/jpeg|image\/webp);base64,([A-Za-z0-9+/=]+)$/.exec(result.assetUrl)
-  if(!match)throw new Error('ComfyUI returned an unsupported image')
-  const bytes=Buffer.from(match[2],'base64')
-  const meta=await sharp(bytes).metadata()
-  if(meta.width!==task.width || meta.height!==task.height){
-    const message='Unexpected output dimensions: '+meta.width+'x'+meta.height
-    await saveTask(projectId,{...task,status:'failed',error:message},true)
-    return{status:'error',error:message}
-  }
-  snapshot=await store.advancePair(projectId,snapshot.revision,pairId,panelIndex===0?'review_first':'review_second')
-  snapshot=await store.stageImage(projectId,snapshot.revision,pairId,panelIndex,bytes,
-    match[1] as 'image/png'|'image/jpeg'|'image/webp')
-  return{status:'review',snapshot}
+  return withRenderTaskLock(projectId,pairId,panelIndex,async()=>{
+    const task=await getTask(projectId,pairId,panelIndex)
+    if(!task)throw new Error('No recorded ComfyUI job')
+    let snapshot=await store.read(projectId)
+    const pair=snapshot.pairs.find(p=>p.plan.id===pairId)
+    if(!pair)throw new Error('Unknown pair')
+    const expected=panelIndex===0?'rendering_first':'rendering_second'
+    const review=panelIndex===0?'review_first':'review_second'
+    const panelId=pair.plan.panels[panelIndex].id
+    if(pair.job.status===review){
+      // Legacy interrupted requests can have review status without a staged image.
+      // Only return review once there is an actual image to inspect.
+      if(snapshot.catalog.assets.some(a=>a.kind==='previous-panel'&&a.ownerId===panelId&&a.status==='draft'))
+        return{status:'review',snapshot}
+    }else if(pair.job.status!==expected){
+      throw new Error('Unexpected pair state '+pair.job.status)
+    }
+    if(task.status==='submitting')return{status:'submitting'}
+    if(task.status==='failed')return{status:'error',error:task.error||'Previous render failed; press restart'}
+    if(!task.promptId)throw new Error('Missing ComfyUI prompt ID')
+    const result=await pollComfyUI(task.promptId)
+    if(result.status==='error'){
+      await saveTask(projectId,{...task,status:'failed',error:result.error||'ComfyUI failed'},true)
+      return{status:'error',error:result.error}
+    }
+    if(result.status!=='completed')return{status:result.status,error:result.error}
+    const match=/^data:(image\/png|image\/jpeg|image\/webp);base64,([A-Za-z0-9+/=]+)$/.exec(result.assetUrl)
+    if(!match)throw new Error('ComfyUI returned an unsupported image')
+    const bytes=Buffer.from(match[2],'base64')
+    const meta=await sharp(bytes).metadata()
+    if(meta.width!==task.width||meta.height!==task.height){
+      const message='Unexpected output dimensions: '+meta.width+'x'+meta.height
+      await saveTask(projectId,{...task,status:'failed',error:message},true)
+      return{status:'error',error:message}
+    }
+    // A single atomic ProjectStore change moves rendering -> review and saves the
+    // image record. Retrying after a network drop can no longer strand an empty review.
+    snapshot=await store.stageImage(projectId,snapshot.revision,pairId,panelIndex,bytes,
+      match[1] as 'image/png'|'image/jpeg'|'image/webp')
+    return{status:'review',snapshot}
+  })
 }
 export async function inspectWebtoonPanel(projectId:string,pairId:string,panelIndex:0|1,assetId:string){
   const snapshot=await store.read(projectId)
@@ -299,8 +354,16 @@ export async function rejectWebtoonPanel(projectId:string,pairId:string,panelInd
 }
 export async function editWebtoonBubble(projectId:string,panelId:string,bubbleId:string,text:string,
   box:[number,number,number,number]){
-  const snapshot=await store.read(projectId)
-  return store.setBubble(projectId,snapshot.revision,panelId,bubbleId,text,box)
+  // A rapid sequence of edits can race with auto-progress/QA revisions.
+  // Retry only the optimistic conflict, never validation or immutable-episode errors.
+  for(let attempt=0;attempt<3;attempt++){
+    const snapshot=await store.read(projectId)
+    try{return await store.setBubble(projectId,snapshot.revision,panelId,bubbleId,text,box)}
+    catch(error){
+      if(!(error instanceof Error)||!error.message.startsWith('Revision conflict')||attempt===2)throw error
+    }
+  }
+  throw new Error('Unable to persist dialogue edits')
 }
 export async function webtoonAsset(projectId:string,assetId:string){return store.readAsset(projectId,assetId)}
 
@@ -329,11 +392,14 @@ export async function planOneWebtoonPairStep(projectId:string,episodeId:string,s
 }
 
 /** LLM casting proposal only; no character/location is registered without an approved image. */
-export async function suggestWebtoonCast(story:string,bible:string){
-  return proposeCast(story,bible,({systemPrompt,userPrompt,maxNewTokens})=>predict({
+export async function suggestWebtoonCast(projectId:string,story:string,bible:string){
+  const suggestions=await proposeCast(story,bible,({systemPrompt,userPrompt,maxNewTokens})=>predict({
     systemPrompt,userPrompt,nbMaxNewTokens:maxNewTokens,
     llmVendorConfig:{vendor:'SERVER',apiKey:'',modelId:''}
   }))
+  const snapshot=await store.read(projectId)
+  // Suggestions are unapproved metadata, never canonical image masters.
+  return store.saveCasting(projectId,snapshot.revision,suggestions)
 }
 
 export async function saveWebtoonStory(projectId:string,premise:string,bible:string){

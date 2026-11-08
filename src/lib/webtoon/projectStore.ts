@@ -21,6 +21,11 @@ import {
   type ReferenceAsset,
 } from './contracts.ts'
 
+export interface MasterGenerationJob {
+  promptId:string;ownerId:string;kind:'identity'|'location'|'view'|'outfit'
+  outfitId?:string;view?:import('./contracts.ts').Facing
+  description:string;createdAt:string;status:'pending'|'staged'
+}
 export interface PairRecord { plan: PairPlan; job: PairJob }
 export interface ProjectSnapshot {
   schemaVersion: 1
@@ -33,6 +38,7 @@ export interface ProjectSnapshot {
   bubbleOverrides?: Record<string, Record<string, {text:string;box:[number,number,number,number]}>>
   rejections?: Array<{panelId:string;assetId:string;reason:string;at:string}>
   draftCasting?: CastProposals
+  masterJobs?: MasterGenerationJob[]
   series?: SeriesLedger
 }
 
@@ -152,8 +158,16 @@ export class ProjectStore {
   async read(projectId: string): Promise<ProjectSnapshot> {
     return structuredClone(await this.readRaw(projectId))
   }
-  async appendPair(projectId: string, expectedRevision: number, plan: PairPlan): Promise<ProjectSnapshot> {
+  async appendPair(projectId: string, expectedRevision: number, plan: PairPlan,
+    episodeStart?:{targetPairs:number;startState:import('./contracts.ts').SceneState}): Promise<ProjectSnapshot> {
     return this.modify(projectId, expectedRevision, snapshot => {
+      if(episodeStart){
+        snapshot.series ||= emptySeries()
+        if(snapshot.pairs.length&&!snapshot.series.episodes.length)
+          throw Error('Legacy pairs require migration before a new episode')
+        beginEpisode(snapshot.series,{id:plan.episodeId,targetPairs:episodeStart.targetPairs,
+          startState:episodeStart.startState})
+      }
       if (snapshot.pairs.some(item => item.plan.id === plan.id)) throw new Error('Duplicate pair ID')
       const existingPanelIds=new Set(snapshot.pairs.flatMap(p=>p.plan.panels.map(panel=>panel.id)))
       if(plan.panels.some(panel=>existingPanelIds.has(panel.id)))
@@ -180,8 +194,8 @@ export class ProjectStore {
     return this.modify(projectId, expectedRevision, snapshot => {
       const item = snapshot.pairs.find(entry => entry.plan.id === pairId)
       if (!item) throw new Error('Unknown pair ID')
-      if (event === 'approve_first' || event === 'approve_second' || event === 'validate')
-        throw new Error('This event must use the dedicated approval function')
+      // NonApprovalEvent excludes approval/validation statically; the runtime
+      // state machine independently rejects invalid transitions.
       item.job = transitionPairJob(item.job, event)
     })
   }
@@ -195,12 +209,16 @@ export class ProjectStore {
     if (!magic) throw new Error('Image header does not match MIME type')
     const extension = mime === 'image/png' ? 'png' : mime === 'image/jpeg' ? 'jpg' : 'webp'
     const digest = hash(image)
-    const assetId = 'render_' + createHash('sha256').update(pairId + ':' + panelIndex + ':' + digest).digest('hex').slice(0, 40)
+    const assetId = 'render_' + createHash('sha256').update(
+      pairId + ':' + panelIndex + ':' + digest + ':' + expectedRevision
+    ).digest('hex').slice(0, 40)
     return this.modify(projectId, expectedRevision, async snapshot => {
       const pair = snapshot.pairs.find(entry => entry.plan.id === pairId)
       if (!pair) throw new Error('Unknown pair')
       const expected = panelIndex === 0 ? 'review_first' : 'review_second'
-      if (pair.job.status !== expected) throw new Error('Image stage requires matching review state')
+      const rendering=panelIndex===0?'rendering_first':'rendering_second'
+      if (pair.job.status !== expected && pair.job.status !== rendering)
+        throw new Error('Image stage requires rendering or review state')
       if (snapshot.catalog.assets.some(a => a.id === assetId)) throw new Error('Image already staged')
       const mediaDir = join(this.dir(projectId), 'assets')
       await mkdir(mediaDir, {recursive: true})
@@ -209,6 +227,8 @@ export class ProjectStore {
       catch(e) { if ((e as NodeJS.ErrnoException).code !== 'EEXIST') throw e }
       // Verify even when a file with the same hash-named path already exists.
       if (hash(await readFile(file)) !== digest) throw new Error('Image store checksum mismatch')
+      if(pair.job.status===rendering)
+        pair.job=transitionPairJob(pair.job,panelIndex===0?'review_first':'review_second')
       snapshot.catalog.assets.push({id:assetId,kind:'previous-panel',ownerId:pair.plan.panels[panelIndex].id,
         uri:'assets/' + digest + '.' + extension,sha256:digest,status:'draft',version:1})
     })
@@ -227,8 +247,7 @@ export class ProjectStore {
       if (!asset || asset.kind !== 'previous-panel' || asset.ownerId !== entry.plan.panels[panelIndex].id ||
           asset.status !== 'draft' || !asset.sha256 || !asset.uri.startsWith('assets/'))
         throw new Error('Cannot approve an unstaged or mismatched image')
-      const actual = await readFile(join(this.dir(projectId), asset.uri))
-      if (hash(actual) !== asset.sha256) throw new Error('Image checksum mismatch at approval')
+      await this.verifiedAsset(projectId,asset)
       asset.status = 'approved'
       entry.job = transitionPairJob(entry.job, panelIndex === 0 ? 'approve_first' : 'approve_second', assetId)
       snapshot.approvedPanels.push({id:entry.plan.panels[panelIndex].id,sceneId:entry.plan.panels[panelIndex].sceneId,
@@ -377,10 +396,29 @@ export class ProjectStore {
     const bytes=await this.verifiedAsset(projectId,asset)
     return{asset,bytes,mime:asset.uri.endsWith('.png')?'image/png':asset.uri.endsWith('.jpg')?'image/jpeg':'image/webp'}
   }
+  async recordMasterJob(projectId:string,rev:number,input:Omit<MasterGenerationJob,'status'|'createdAt'>):Promise<ProjectSnapshot>{
+    assertId(input.ownerId)
+    if(!/^[a-zA-Z0-9_-]{6,128}$/.test(input.promptId))
+      throw Error('Invalid ComfyUI master prompt ID')
+    if(!['identity','location','view','outfit'].includes(input.kind))
+      throw Error('Invalid master job kind')
+    if(input.kind==='view'&&!input.view)throw Error('View angle required')
+    if(input.kind==='outfit'&&!input.outfitId)throw Error('Outfit ID required')
+    if(input.outfitId)assertId(input.outfitId)
+    if(!input.description.trim()||input.description.length>1800)throw Error('Master description required')
+    return this.modify(projectId,rev,snapshot=>{
+      snapshot.masterJobs ||= []
+      if(snapshot.masterJobs.some(job=>job.promptId===input.promptId))
+        throw Error('Duplicate master prompt ID')
+      snapshot.masterJobs.push({...input,description:input.description.trim(),
+        createdAt:new Date().toISOString(),status:'pending'})
+    })
+  }
+
   async stageMaster(projectId:string,rev:number,input:{
     ownerId:string;kind:'identity'|'location'|'outfit'|'view';image:Buffer;
     mime:'image/png'|'image/jpeg'|'image/webp';outfitId?:string;
-    view?:import('./contracts.ts').Facing
+    view?:import('./contracts.ts').Facing;promptId?:string
   }):Promise<ProjectSnapshot>{
     assertId(input.ownerId)
     if(input.outfitId)assertId(input.outfitId)
@@ -393,7 +431,9 @@ export class ProjectStore {
     if(!magic)throw new Error('Wrong master image format')
     const ext=input.mime==='image/png'?'png':input.mime==='image/jpeg'?'jpg':'webp'
     const sha=hash(bytes)
-    const id='master_'+createHash('sha256').update(input.ownerId+input.kind+sha).digest('hex').slice(0,40)
+    const id='master_'+createHash('sha256').update(JSON.stringify([
+      input.ownerId,input.kind,input.outfitId||'',input.view||'',sha
+    ])).digest('hex').slice(0,40)
     return this.modify(projectId,rev,async snapshot=>{
       if(snapshot.catalog.assets.some(a=>a.id===id))throw new Error('Master draft already exists')
       if(input.kind==='identity'&&snapshot.catalog.characters.some(c=>c.id===input.ownerId))
@@ -402,6 +442,8 @@ export class ProjectStore {
         throw new Error('Cannot overwrite approved location')
       const character=snapshot.catalog.characters.find(c=>c.id===input.ownerId)
       if((input.kind==='outfit'||input.kind==='view')&&!character)throw new Error('Unknown character')
+      if(input.kind==='outfit'&&!input.outfitId)throw new Error('Outfit ID required')
+      if(input.kind==='view'&&!input.view)throw new Error('View angle required')
       const dir=join(this.dir(projectId),'refs')
       await mkdir(dir,{recursive:true})
       const file=join(dir,sha+'.'+ext)
@@ -411,6 +453,14 @@ export class ProjectStore {
       snapshot.catalog.assets.push({id,kind:input.kind,ownerId:input.ownerId,uri:'refs/'+sha+'.'+ext,
         status:'draft',version:character?.version||1,sha256:sha,
         ...(input.outfitId?{outfitId:input.outfitId}:{}),...(input.view?{view:input.view}:{})})
+      if(input.promptId){
+        const job=snapshot.masterJobs?.find(job=>job.promptId===input.promptId&&job.status==='pending')
+        if(!job||job.ownerId!==input.ownerId||job.kind!==input.kind||
+          (job.view||'')!==(input.view||'')||
+          (job.outfitId||'')!==(input.outfitId||''))
+          throw Error('Master job identity/angle does not match the submitted image')
+        job.status='staged'
+      }
     })
   }
   async approveCharacter(projectId:string,rev:number,assetId:string,input:{
@@ -448,8 +498,11 @@ export class ProjectStore {
       if(!asset||asset.status!=='draft'||!['view','outfit'].includes(asset.kind))throw new Error('Draft view/outfit required')
       const character=snapshot.catalog.characters.find(c=>c.id===asset.ownerId)
       if(!character||character.version!==asset.version)throw new Error('Invalid character version')
-      if(asset.kind==='outfit'&&!character.outfitIds.includes(asset.outfitId||''))throw new Error('Unknown outfit')
+      if(asset.kind==='outfit'&&!asset.outfitId)throw new Error('Outfit reference needs an outfit ID')
+      if(asset.kind==='view'&&!asset.view)throw new Error('View reference needs an explicit angle')
       await this.verifiedAsset(projectId,asset)
+      if(asset.kind==='outfit'&&!character.outfitIds.includes(asset.outfitId!))
+        character.outfitIds.push(asset.outfitId!)
       asset.status='approved'
     })
   }
@@ -471,7 +524,10 @@ export class ProjectStore {
       const episode=snapshot.series?.episodes.find(e=>e.id===parent?.plan.episodeId)
       if(episode&&text!==existingText){
         const pairPosition=episode.pairIds.indexOf(parent!.plan.id)
-        if(pairPosition>=0&&pairPosition<episode.pairIds.length-1)
+        const laterPairExists=pairPosition>=0&&pairPosition<episode.pairIds.length-1
+        const laterPanelAlreadyRendered=panelId===parent!.plan.panels[0].id&&
+          ['first_approved','rendering_second','review_second','approved'].includes(parent!.job.status)
+        if(laterPairExists||laterPanelAlreadyRendered)
           episode.continuityReviewRequired=true
       }
       snapshot.bubbleOverrides ||= {}

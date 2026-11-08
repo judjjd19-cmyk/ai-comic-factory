@@ -2,11 +2,13 @@ stages:
   - test
   - import
 
-# Does not require npm ci: the webtoon contract tests use only Node built-ins.
+# Pipeline tests now include the real Sharp mask upload boundary.
+# Install dependencies rather than letting missing runtime imports pass unnoticed.
 webtoon_contract_tests:
   stage: test
-  image: node:22-alpine
+  image: node:22-bookworm-slim
   script:
+    - npm ci
     - npm run test:webtoon
 
 # Full integration gate. A green contract test alone does not prove a working Next.js app.
