@@ -49,7 +49,8 @@ export async function predict({
 
     return res.choices[0].message.content || ""
   } catch (err) {
-    console.error(`error during generation: ${err}`)
-    return ""
+    // Preserve the real inference failure. Returning an empty string makes a
+    // disconnected llama-server indistinguishable from malformed storyboard JSON.
+    throw new Error('LLM inference failed', {cause:err})
   }
 }

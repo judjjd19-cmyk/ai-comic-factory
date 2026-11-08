@@ -176,16 +176,10 @@ export async function planWebtoonPair(projectId:string,storyGoal:string,episodeI
     systemPrompt,userPrompt,nbMaxNewTokens:maxNewTokens,
     llmVendorConfig:{vendor:'SERVER',apiKey:'',modelId:''}
   }))
-  // Check revision again; no speculative plan may overwrite a concurrently approved pair.
-  let current=snapshot
-  if(!active){
-    const previous=current.series?.episodes.at(-1)
-    if(previous&&previous.status!=='completed')throw Error('Complete the preceding episode before starting another')
-    current=await store.beginEpisode(projectId,current.revision,{
-      episodeId,targetPairs,startState:last?.plan.after||initial
-    })
-  }
-  return store.appendPair(projectId,current.revision,plan)
+  // Beginning the episode and appending its first pair must commit in ONE manifest revision.
+  // A failed append cannot leave an empty active episode that blocks future work.
+  return store.appendPair(projectId,snapshot.revision,plan,
+    active?undefined:{targetPairs,startState:last?.plan.after||initial})
 }
 export async function startWebtoonPanel(projectId:string,pairId:string,panelIndex:0|1,width=768,height=1024){
   if(panelIndex!==0&&panelIndex!==1)throw new Error('Invalid panel index')
@@ -228,36 +222,47 @@ export async function startWebtoonPanel(projectId:string,pairId:string,panelInde
   })
 }
 export async function pollWebtoonPanel(projectId:string,pairId:string,panelIndex:0|1){
-  const task=await getTask(projectId,pairId,panelIndex)
-  if(!task)throw new Error('No recorded ComfyUI job')
-  if(task.status==='submitting')return{status:'submitting'}
-  if(task.status==='failed')return{status:'error',error:task.error||'Previous render failed; press restart'}
-  let snapshot=await store.read(projectId)
-  const record=snapshot.pairs.find(p=>p.plan.id===pairId)
-  if(!record)throw new Error('Unknown pair')
-  const review=panelIndex===0?'review_first':'review_second'
-  if(record.job.status===review)return{status:'review',snapshot}
-  const expected=panelIndex===0?'rendering_first':'rendering_second'
-  if(record.job.status!==expected)throw new Error('Unexpected pair state '+record.job.status)
-  const result=await pollComfyUI(task.promptId)
-  if(result.status==='error'){
-    await saveTask(projectId,{...task,status:'failed',error:result.error||'ComfyUI failed'},true)
-    return{status:'error',error:result.error}
-  }
-  if(result.status!=='completed')return{status:result.status,error:result.error}
-  const match=/^data:(image\/png|image\/jpeg|image\/webp);base64,([A-Za-z0-9+/=]+)$/.exec(result.assetUrl)
-  if(!match)throw new Error('ComfyUI returned an unsupported image')
-  const bytes=Buffer.from(match[2],'base64')
-  const meta=await sharp(bytes).metadata()
-  if(meta.width!==task.width || meta.height!==task.height){
-    const message='Unexpected output dimensions: '+meta.width+'x'+meta.height
-    await saveTask(projectId,{...task,status:'failed',error:message},true)
-    return{status:'error',error:message}
-  }
-  snapshot=await store.advancePair(projectId,snapshot.revision,pairId,panelIndex===0?'review_first':'review_second')
-  snapshot=await store.stageImage(projectId,snapshot.revision,pairId,panelIndex,bytes,
-    match[1] as 'image/png'|'image/jpeg'|'image/webp')
-  return{status:'review',snapshot}
+  return withRenderTaskLock(projectId,pairId,panelIndex,async()=>{
+    const task=await getTask(projectId,pairId,panelIndex)
+    if(!task)throw new Error('No recorded ComfyUI job')
+    let snapshot=await store.read(projectId)
+    const pair=snapshot.pairs.find(p=>p.plan.id===pairId)
+    if(!pair)throw new Error('Unknown pair')
+    const expected=panelIndex===0?'rendering_first':'rendering_second'
+    const review=panelIndex===0?'review_first':'review_second'
+    const panelId=pair.plan.panels[panelIndex].id
+    if(pair.job.status===review){
+      // Legacy interrupted requests can have review status without a staged image.
+      // Only return review once there is an actual image to inspect.
+      if(snapshot.catalog.assets.some(a=>a.kind==='previous-panel'&&a.ownerId===panelId&&a.status==='draft'))
+        return{status:'review',snapshot}
+    }else if(pair.job.status!==expected){
+      throw new Error('Unexpected pair state '+pair.job.status)
+    }
+    if(task.status==='submitting')return{status:'submitting'}
+    if(task.status==='failed')return{status:'error',error:task.error||'Previous render failed; press restart'}
+    if(!task.promptId)throw new Error('Missing ComfyUI prompt ID')
+    const result=await pollComfyUI(task.promptId)
+    if(result.status==='error'){
+      await saveTask(projectId,{...task,status:'failed',error:result.error||'ComfyUI failed'},true)
+      return{status:'error',error:result.error}
+    }
+    if(result.status!=='completed')return{status:result.status,error:result.error}
+    const match=/^data:(image\/png|image\/jpeg|image\/webp);base64,([A-Za-z0-9+/=]+)$/.exec(result.assetUrl)
+    if(!match)throw new Error('ComfyUI returned an unsupported image')
+    const bytes=Buffer.from(match[2],'base64')
+    const meta=await sharp(bytes).metadata()
+    if(meta.width!==task.width||meta.height!==task.height){
+      const message='Unexpected output dimensions: '+meta.width+'x'+meta.height
+      await saveTask(projectId,{...task,status:'failed',error:message},true)
+      return{status:'error',error:message}
+    }
+    // A single atomic ProjectStore change moves rendering -> review and saves the
+    // image record. Retrying after a network drop can no longer strand an empty review.
+    snapshot=await store.stageImage(projectId,snapshot.revision,pairId,panelIndex,bytes,
+      match[1] as 'image/png'|'image/jpeg'|'image/webp')
+    return{status:'review',snapshot}
+  })
 }
 export async function inspectWebtoonPanel(projectId:string,pairId:string,panelIndex:0|1,assetId:string){
   const snapshot=await store.read(projectId)

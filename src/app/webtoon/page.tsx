@@ -159,7 +159,7 @@ export default function WebtoonStudio(){
     setLoadedStoryVersion(key)
   },[snapshot?.projectId,snapshot?.story?.version,loadedStoryVersion])
   const assetForPanel=(panelId:string)=>snapshot?.catalog.assets.filter(a=>
-    a.kind==='previous-panel'&&a.ownerId===panelId&&a.status!=='rejected').at(-1)
+    a.kind==='previous-panel'&&a.ownerId===panelId&&(a.status==='draft'||a.status==='approved')).at(-1)
   const saveBubble=async(panelId:string,bubble:BubblePlan,text:string,box=bubble.box)=>{
     if(!snapshot)return
     await run('editBubble',{panelId,bubbleId:bubble.id,text,box})
@@ -649,7 +649,7 @@ export default function WebtoonStudio(){
               <option value="front">정면</option><option value="left">왼쪽</option>
               <option value="right">오른쪽</option><option value="back">후면</option></select>}
             <textarea className="border rounded p-2 w-full" placeholder="외형·장소 설명" value={description} onChange={e=>setDescription(e.target.value)} rows={3}/>
-            {kind==='identity'&&<input className="border rounded p-2 w-full" placeholder="의상 ID" value={outfitId} onChange={e=>setOutfitId(e.target.value)}/>}
+            {(kind==='identity'||kind==='outfit')&&<input className="border rounded p-2 w-full" placeholder="의상 ID" value={outfitId} onChange={e=>setOutfitId(e.target.value)}/>}
             <input type="file" accept="image/png,image/jpeg,image/webp" onChange={e=>{setFile(e.target.files?.[0]||null);setGenerated('');setMasterContext(null);setMasterPromptId('')}}/>
             <div className="flex gap-2 flex-wrap">
               <button className="border rounded px-3 py-2" disabled={busy}
