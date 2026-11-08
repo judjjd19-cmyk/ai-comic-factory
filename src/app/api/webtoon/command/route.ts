@@ -3,7 +3,7 @@ import {
   listWebtoonProjects,createWebtoonProject,webtoonSnapshot,stageWebtoonMaster,
   approveWebtoonCharacter,approveWebtoonLocation,approveWebtoonSupplement,
   generateMasterImage,pollMasterImage,planWebtoonPair,startWebtoonPanel,
-  pollWebtoonPanel,approveWebtoonPanel,rejectWebtoonPanel,editWebtoonBubble,
+  pollWebtoonPanel,approveWebtoonPanel,rejectWebtoonPanel,editWebtoonBubble,generateCharacterReference,
   planEntireWebtoonEpisode,nextPlannedWebtoonPair,savedWebtoonEpisodeDrafts,inspectWebtoonPanel,planOneWebtoonPairStep,
 } from '@/lib/webtoon/studioService'
 
@@ -55,7 +55,11 @@ export async function POST(request:Request){
       case 'approveSupplement':
         data=await approveWebtoonSupplement(projectId,rev,assetId);break
       case 'generateMaster':
-        data=await generateMasterImage(str(body.prompt),number(body.width)||768,number(body.height)||1024);break
+        data=body.kind==='view'||body.kind==='outfit'
+          ?await generateCharacterReference(projectId,str(body.ownerId),body.kind,
+            str(body.prompt),str(body.view) as 'front'|'left'|'right'|'back',
+            number(body.width)||768,number(body.height)||1024)
+          :await generateMasterImage(str(body.prompt),number(body.width)||768,number(body.height)||1024);break
       case 'pollMaster':
         data=await pollMasterImage(str(body.promptId));break
       case 'planEpisodeStep':

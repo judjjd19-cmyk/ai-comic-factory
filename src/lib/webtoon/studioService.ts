@@ -3,6 +3,9 @@ import 'server-only'
 import {mkdir,readFile,writeFile,rename,rm,stat} from 'node:fs/promises'
 import sharp from 'sharp'
 import {inspectLayout} from './panelQA'
+import {uploadSelectedReferences} from './comfyReference'
+import {makeActorMask,uploadActorMask} from './regionMasks'
+import type {PanelPlan,SelectedReference} from './contracts'
 import {resolve,join} from 'node:path'
 import {randomUUID} from 'node:crypto'
 import {ProjectStore, type ProjectSnapshot} from './projectStore'
@@ -83,6 +86,37 @@ export async function generateMasterImage(prompt:string,width=768,height=1024){
   return submitComfyUI('single character design sheet, consistent appearance, no text; '+prompt,width,height)
 }
 export async function pollMasterImage(promptId:string){return pollComfyUI(promptId)}
+/** Generate additional views/outfits from immutable approved identity, not free-running txt2img. */
+export async function generateCharacterReference(projectId:string,ownerId:string,kind:'view'|'outfit',
+  description:string,view:'front'|'left'|'right'|'back'='front',width=768,height=1024){
+  safeId(ownerId)
+  if(!['view','outfit'].includes(kind)||!['front','left','right','back'].includes(view))
+    throw new Error('Invalid character reference request')
+  if(!description.trim()||description.length>1600)throw new Error('Character prompt required')
+  const snapshot=await store.read(projectId)
+  const character=snapshot.catalog.characters.find(c=>c.id===ownerId)
+  if(!character)throw new Error('Approved character identity required before generating additional views')
+  const master=snapshot.catalog.assets.find(a=>a.id===character.identityReferenceId)
+  if(!master||master.status!=='approved')throw new Error('Unapproved character master')
+  const selected:SelectedReference[]=[{assetId:master.id,purpose:'identity',characterId:ownerId}]
+  const projectRoot=join(root(),safeId(projectId))
+  const endpoint=process.env.COMFYUI_API_URL||'http://127.0.0.1:8188'
+  const uploaded=await uploadSelectedReferences(projectRoot,snapshot.catalog.assets,selected,endpoint)
+  const box:[number,number,number,number]=[0.12,0.07,0.76,0.88]
+  const panel:PanelPlan={id:'reference',sceneId:'reference',locationId:'reference',
+    summary:description,camera:view,characters:[{
+      characterId:ownerId,outfitId:character.outfitIds[0],action:'neutral standing',
+      emotion:'neutral',box,facing:view
+    }],bubbles:[],events:[]}
+  const masks:Record<string,string>={}
+  for(const reference of uploaded){
+    masks[reference.assetId]=await uploadActorMask(endpoint,await makeActorMask(width,height,box))
+  }
+  const prompt='same recognizable character as the reference image, '+
+    'consistent facial structure, hair and eye colors, '+view+' view, '+
+    'character reference illustration, clean line art, no text, '+description
+  return submitComfyUI(prompt,width,height,{uploaded,auto:{panel,masks}})
+}
 export async function planWebtoonPair(projectId:string,storyGoal:string,episodeId='episode1',
   locationId?:string,storyBibleSummary=''):Promise<ProjectSnapshot>{
   if(!storyGoal.trim()||storyGoal.length>5000)throw new Error('Story goal must be provided')
