@@ -643,7 +643,7 @@ export default function WebtoonStudio(){
             {t.id} · {t.description} (처음: {t.introducedEpisode})
           </p>)}
         </div>}
-      </section>
+      </section>}
       {snapshot&&<section className="rounded-xl bg-white p-4 space-y-3">
         <h2 className="font-bold text-xl">2. 스토리에서 주요 인물·장소 초안 제안</h2>
         <p className="text-sm text-stone-600">LLM이 캐릭터 외형과 주요 장소를 제안해. 아래 제안은 아직 기준 이미지가 아니며, 이미지를 생성·확인·승인해야 고정 원본이 돼.</p>
@@ -808,7 +808,7 @@ export default function WebtoonStudio(){
           <button className="rounded border px-4 py-2 disabled:opacity-40" disabled={busy||(lastPair&&lastPair.job.status!=='approved')}
             onClick={()=>void planPair()}>즉석 다음 2컷 계획</button>
         </div>
-        {remainingDrafts!==null&&<p className="text-sm">아직 활성화되지 않은 사전 콘티: {remainingDrafts}쌍</p>
+        {remainingDrafts!==null&&<p className="text-sm">아직 활성화되지 않은 사전 콘티: {remainingDrafts}쌍</p>}
         {lastPair&&<div className="border rounded p-3 text-sm">
           <strong>{lastPair.plan.id} · {lastPair.job.status}</strong>
           {lastPair.plan.panels.map((panel,i)=><p key={i}>{i+1}컷: {panel.summary} — {panel.characters.map(a=>a.action).join(', ')}</p>)}
