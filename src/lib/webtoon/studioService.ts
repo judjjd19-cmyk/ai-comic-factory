@@ -325,8 +325,16 @@ export async function rejectWebtoonPanel(projectId:string,pairId:string,panelInd
 }
 export async function editWebtoonBubble(projectId:string,panelId:string,bubbleId:string,text:string,
   box:[number,number,number,number]){
-  const snapshot=await store.read(projectId)
-  return store.setBubble(projectId,snapshot.revision,panelId,bubbleId,text,box)
+  // A rapid sequence of edits can race with auto-progress/QA revisions.
+  // Retry only the optimistic conflict, never validation or immutable-episode errors.
+  for(let attempt=0;attempt<3;attempt++){
+    const snapshot=await store.read(projectId)
+    try{return await store.setBubble(projectId,snapshot.revision,panelId,bubbleId,text,box)}
+    catch(error){
+      if(!(error instanceof Error)||!error.message.startsWith('Revision conflict')||attempt===2)throw error
+    }
+  }
+  throw new Error('Unable to persist dialogue edits')
 }
 export async function webtoonAsset(projectId:string,assetId:string){return store.readAsset(projectId,assetId)}
 

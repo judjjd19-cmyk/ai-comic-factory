@@ -98,6 +98,9 @@ export default function WebtoonStudio(){
   const renderPollingRef=useRef(false)
   const masterPollingRef=useRef(false)
   const autoActionRef=useRef('')
+  const bubbleQueueRef=useRef<Promise<void>>(Promise.resolve())
+  const projectIdRef=useRef(projectId)
+  useEffect(()=>{projectIdRef.current=projectId},[projectId])
   const [pollFailed,setPollFailed]=useState(false)
   const cancelPlanningRef=useRef(false)
 
@@ -160,9 +163,18 @@ export default function WebtoonStudio(){
   },[snapshot?.projectId,snapshot?.story?.version,loadedStoryVersion])
   const assetForPanel=(panelId:string)=>snapshot?.catalog.assets.filter(a=>
     a.kind==='previous-panel'&&a.ownerId===panelId&&(a.status==='draft'||a.status==='approved')).at(-1)
-  const saveBubble=async(panelId:string,bubble:BubblePlan,text:string,box=bubble.box)=>{
-    if(!snapshot)return
-    await run('editBubble',{panelId,bubbleId:bubble.id,text,box})
+  const saveBubble=(panelId:string,bubble:BubblePlan,text:string,box=bubble.box)=>{
+    const target=projectId
+    if(!target)return
+    // Do not silently discard blur events while another request is running.
+    // Serialized edits avoid overwriting one dialogue with an older response.
+    bubbleQueueRef.current=bubbleQueueRef.current.catch(()=>{}).then(async()=>{
+      const data=await request('editBubble',{projectId:target,panelId,bubbleId:bubble.id,text,box})
+      if(projectIdRef.current===target)setSnapshot(data)
+    }).catch(error=>{
+      if(projectIdRef.current===target)
+        setMessage('말풍선 저장 실패: '+(error instanceof Error?error.message:String(error)))
+    })
   }
   const stageMaster=async()=>{
     if(!snapshot)return
