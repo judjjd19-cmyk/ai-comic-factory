@@ -286,7 +286,8 @@ export default function WebtoonStudio(){
   const resetRender=async(pairId:string,index:0|1)=>{
     await run('resetPanelTask',{pairId,panelIndex:index,
       reason:'ComfyUI interrupted or an earlier image job is no longer available'},()=>{
-        setPollFailed(false)
+        // Hold polling until a replacement task has actually been submitted.
+        setPollFailed(true)
         setMessage('기존 작업을 보관했어. 해당 컷 작업을 다시 제출해.')
       })
   }
