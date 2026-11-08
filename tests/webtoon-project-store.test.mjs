@@ -46,7 +46,7 @@ test('staged images cannot become next-panel references until explicitly approve
  state=await store.stageImage('test',state.revision,'pair1',0,png,'image/png')
  const asset=state.catalog.assets.at(-1)
  assert.equal(asset.status,'draft')
- assert.equal(selectReferences(state.pairs[0].plan.panels[1],state.catalog,{id:'pair1_0',planId:'pair1',sceneId:'scene1',assetId:asset.id,approvedAt:'now'}).some(r=>r.purpose==='continuity'),false)
+ assert.throws(()=>selectReferences(state.pairs[0].plan.panels[1],state.catalog,{id:'pair1_0',planId:'pair1',sceneId:'scene1',assetId:asset.id,approvedAt:'now'}),/Approved previous-panel continuity reference is missing/)
  state=await store.approvePanel('test',state.revision,'pair1',0,asset.id,'human-reviewer')
  assert.equal(state.pairs[0].job.status,'first_approved')
  assert.equal(selectReferences(state.pairs[0].plan.panels[1],state.catalog,state.approvedPanels[0]).some(r=>r.purpose==='continuity'),true)
