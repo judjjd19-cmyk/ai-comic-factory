@@ -69,35 +69,46 @@ export function initialScene(catalog:WebtoonCatalog,locationId?:string):SceneSta
 async function withDraftLock<T>(file:string,action:()=>Promise<T>):Promise<T>{
   const lock=file+'.lock'
   await mkdir(dirname(file),{recursive:true})
-  for(let retries=0;retries<2;retries++){
+  let acquired=false
+  for(let retries=0;retries<3&&!acquired;retries++){
     try{
       await mkdir(lock)
-      await writeFile(join(lock,'owner.json'),JSON.stringify({pid:process.pid,at:Date.now()}))
-      try{return await action()}
-      finally{await rm(lock,{recursive:true,force:true})}
+      acquired=true
+      try{
+        await writeFile(join(lock,'owner.json'),JSON.stringify({pid:process.pid,at:Date.now()}))
+      }catch(e){
+        await rm(lock,{recursive:true,force:true})
+        throw e
+      }
     }catch(e){
+      if(acquired)throw e
       if((e as NodeJS.ErrnoException).code!=='EEXIST')throw e
       const meta=await stat(lock).catch(()=>null)
       if(!meta)continue
       let pid:number|null=null
-      try{pid=JSON.parse(await readFile(join(lock,'owner.json'),'utf8')).pid}
+      try{pid=Number(JSON.parse(await readFile(join(lock,'owner.json'),'utf8')).pid)}
       catch{}
       let alive=false
       if(Number.isInteger(pid)&&Number(pid)>1){
         try{process.kill(pid as number,0);alive=true}
-        catch(e){alive=(e as NodeJS.ErrnoException).code==='EPERM'}
+        catch(error){alive=(error as NodeJS.ErrnoException).code==='EPERM'}
       }
       if(alive||Date.now()-meta.mtimeMs<15_000)
-        throw new Error('Another episode-planning request is active')
-      // Do not remove a newer lock acquired concurrently by someone else.
+        throw Error('Another episode-planning request is active')
+      const abandoned=lock+'.abandoned.'+randomUUID()
       try{
-        const abandoned=lock+'.abandoned.'+randomUUID()
         await rename(lock,abandoned)
         await rm(abandoned,{recursive:true,force:true})
-      }catch(e){if((e as NodeJS.ErrnoException).code!=='ENOENT')throw e}
+      }catch(error){
+        if((error as NodeJS.ErrnoException).code!=='ENOENT')throw error
+      }
     }
   }
-  throw new Error('Could not acquire episode planner lock')
+  if(!acquired)throw Error('Could not acquire episode planner lock')
+  // Keep work exceptions outside the lock-acquisition catch. In particular an
+  // EEXIST thrown by save/append is NOT a reason to rerun the LLM job.
+  try{return await action()}
+  finally{await rm(lock,{recursive:true,force:true})}
 }
 
 async function rejectUnfinishedParallelDrafts(projectId:string,currentEpisodeId:string,
