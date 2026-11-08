@@ -58,6 +58,7 @@ test('2 episodes: stable IDs, approval-gated finalization, open thread and resol
  let state=await completePair(store,'episode1')
  const ep=state.series.episodes[0]
  assert.equal(episodeCompletionReady(ep,state.pairs,new Set(state.approvedPanels.map(p=>p.id))).ready,true)
+ state=await store.setBubble('serial',state.revision,'episode1_p00001_1','bubble_1','수정한 마지막 대사',[.65,.03,.3,.2])
  state=await store.finalizeEpisode('serial',state.revision,'episode1',{
    summary:'학교 비밀이 발견됨',endingHook:'누가 숨겼을까?',
    openThreads:[{id:'secret',description:'비밀의 주인이 누구인가'}],
@@ -65,6 +66,9 @@ test('2 episodes: stable IDs, approval-gated finalization, open thread and resol
    relationshipUpdates:[]
  })
  assert.equal(state.series.episodes[0].status,'completed')
+ assert.equal(state.series.episodes[0].handoff.lastDialogue,'수정한 마지막 대사')
+ await assert.rejects(store.setBubble('serial',state.revision,'episode1_p00001_1',
+   'bubble_1','완료 후 무단 수정',[.65,.03,.3,.2]),/immutable/)
  assert.equal(nextEpisodeId(state.series),'episode2')
  assert.deepEqual(state.series.episodes[0].handoff.finalState,state.pairs.at(-1).plan.after)
  const seen=[]
