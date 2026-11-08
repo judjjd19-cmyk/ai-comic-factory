@@ -5,6 +5,7 @@ import { resolve } from "node:path"
 import type { RenderedScene } from "@/types"
 import { bindReferenceNodes, type UploadedReference, type ComfyBindings } from "@/lib/webtoon/comfyReference"
 import { buildAutoIPAdapter } from '@/lib/webtoon/autoAdapter'
+import { validateComfyWorkflow, type ComfyNodeInfo } from '@/lib/webtoon/comfyPreflight'
 import type { PanelPlan } from '@/lib/webtoon/contracts'
 
 type WorkflowReferences = { uploaded: UploadedReference[]; bindings?: ComfyBindings; auto?: { panel: PanelPlan; masks:Record<string,string> } }
@@ -125,8 +126,23 @@ function scene(renderId: string, status: RenderedScene["status"], alt = "", asse
   return { renderId, status, assetUrl, alt, error, maskUrl: "", segments: [] }
 }
 
+let cacheInfo: {url:string;at:number;info:ComfyNodeInfo}|null=null
+async function preflightComfy(workflow:Workflow):Promise<void>{
+  const url=endpoint()
+  let info:ComfyNodeInfo
+  if(cacheInfo&&cacheInfo.url===url&&Date.now()-cacheInfo.at<60_000){
+    info=cacheInfo.info
+  }else{
+    const reply=await fetch(url+"/object_info",{cache:"no-store"})
+    if(!reply.ok)throw new Error("ComfyUI /object_info failed: HTTP "+reply.status)
+    info=await reply.json() as ComfyNodeInfo
+    cacheInfo={url,at:Date.now(),info}
+  }
+  validateComfyWorkflow(workflow,info)
+}
 export async function submitComfyUI(prompt: string, width: number, height: number, references?: WorkflowReferences): Promise<RenderedScene> {
   const workflow = await prepareComfyUIWorkflow(prompt, width, height, references)
+  await preflightComfy(workflow)
   const res = await fetch(endpoint() + "/prompt", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
