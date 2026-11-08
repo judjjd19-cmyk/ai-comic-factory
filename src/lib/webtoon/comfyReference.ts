@@ -72,6 +72,27 @@ export function bindReferenceNodes(workflow: ComfyWorkflow, refs: UploadedRefere
   }
   for(const [id,node] of Object.entries(clone))if(node.class_type==='SaveImage')walk(id)
   if(!reachable.size)throw new Error('ComfyUI API workflow has no SaveImage output')
+  // A LoadImage can be reachable from SaveImage through a postprocessing
+  // composite and still have ZERO influence on generation. Require a path
+  // into the sampler's model/positive/negative conditioning instead.
+  const conditioned=new Set<string>()
+  const walkConditioning=(id:string):void=>{
+    if(conditioned.has(id))return
+    const node=clone[id]
+    if(!node)throw new Error('Conditioning path has an invalid node connection')
+    conditioned.add(id)
+    for(const input of Object.values(node.inputs||{})){
+      if(Array.isArray(input)&&input.length===2&&typeof input[0]==='string'&&Number.isInteger(input[1]))
+        walkConditioning(input[0])
+    }
+  }
+  const samplers=Object.entries(clone).filter(([,node])=>
+    node.class_type==='KSampler'||node.class_type==='KSamplerAdvanced')
+  if(!samplers.length)throw new Error('No model sampler in manual reference workflow')
+  for(const [,sampler] of samplers)for(const key of ['model','positive','negative']){
+    const input=sampler.inputs[key]
+    if(Array.isArray(input)&&typeof input[0]==='string')walkConditioning(input[0])
+  }
   const occupied=new Set<string>()
   for(const ref of refs){
     const key=bindingKey(ref)
@@ -81,6 +102,8 @@ export function bindReferenceNodes(workflow: ComfyWorkflow, refs: UploadedRefere
     const node=clone[id]
     if(!node || node.class_type!=='LoadImage')throw new Error('Reference must map to a LoadImage node: '+key)
     if(!reachable.has(id))throw new Error('Reference LoadImage node is not connected to SaveImage output: '+key)
+    if(!conditioned.has(id))
+      throw new Error('Reference LoadImage does not feed sampler model or text conditioning: '+key)
     if(!/^[\w .()\/-]+\.(png|jpe?g|webp)$/i.test(ref.image) || ref.image.includes('..'))
       throw new Error('Unsafe ComfyUI uploaded reference name')
     node.inputs.image=ref.image
