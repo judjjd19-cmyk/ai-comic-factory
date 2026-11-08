@@ -6,12 +6,12 @@ import {inspectLayout} from './panelQA'
 import {resolve,join} from 'node:path'
 import {randomUUID} from 'node:crypto'
 import {ProjectStore, type ProjectSnapshot} from './projectStore'
-import type {SceneState,PairPlan} from './contracts'
+import type {PairPlan} from './contracts'
 import {generatePairPlan} from './pairPlanner'
 import {predict} from '@/app/queries/predict'
 import {renderQueuedPanel} from '@/app/engine/renderQueuedPanel'
 import {pollComfyUI,submitComfyUI} from '@/app/engine/comfyui'
-import {generateEpisodeDrafts,activateNextEpisodeDraft,readEpisodeDrafts} from './episodeDrafts'
+import {generateEpisodeDrafts,activateNextEpisodeDraft,readEpisodeDrafts,initialScene} from './episodeDrafts'
 
 const store=new ProjectStore()
 const safeId=(x:string):string=>{
@@ -79,12 +79,7 @@ export async function planWebtoonPair(projectId:string,storyGoal:string,episodeI
   if(last&&last.job.status!=='approved')throw new Error('Finish reviewing the previous pair before planning another')
   const location=snapshot.catalog.locations.find(l=>l.id===(locationId||snapshot.catalog.locations[0].id))
   if(!location)throw new Error('Unknown location')
-  const initial:SceneState={sceneId:'scene1',locationId:location.id,timeKey:'initial',
-    actors:snapshot.catalog.characters.slice(0,2).map((c,i)=>({
-      characterId:c.id,outfitId:c.outfitIds[0],
-      box:[i===0?0.08:0.54,0.23,0.36,0.67],
-      facing:i===0?'right':'left',emotion:'neutral',heldPropIds:[]
-    }))}
+  const initial=initialScene(snapshot.catalog,location.id)
   const pairId='pair'+String(snapshot.pairs.length+1).padStart(5,'0')
   const input={
     pairId,episodeId,storyGoal,storyBibleSummary,

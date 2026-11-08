@@ -86,7 +86,7 @@ export default function WebtoonStudio(){
   const selectedMasterDraft=snapshot?.catalog.assets.find(a=>a.id===draftId)
   const lastPair=snapshot?.pairs.at(-1)
   const assetForPanel=(panelId:string)=>snapshot?.catalog.assets.filter(a=>
-    a.kind==='previous-panel'&&a.ownerId===panelId).at(-1)
+    a.kind==='previous-panel'&&a.ownerId===panelId&&a.status!=='rejected').at(-1)
   const saveBubble=async(panelId:string,bubble:BubblePlan,text:string,box=bubble.box)=>{
     if(!snapshot)return
     await run('editBubble',{panelId,bubbleId:bubble.id,text,box})
