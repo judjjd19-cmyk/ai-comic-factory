@@ -67,7 +67,7 @@ export async function POST(request:Request){
       case 'saveStory':
         data=await saveWebtoonStory(projectId,str(body.storyGoal),str(body.storyBibleSummary));break
       case 'suggestCast':
-        data=await suggestWebtoonCast(str(body.storyGoal),str(body.storyBibleSummary));break
+        data=await suggestWebtoonCast(projectId,str(body.storyGoal),str(body.storyBibleSummary));break
       case 'acknowledgeContinuity':
         data=await acknowledgeWebtoonContinuity(projectId,str(body.episodeId),
           str(body.reviewer)||'local-reviewer');break

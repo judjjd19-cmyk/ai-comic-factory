@@ -161,6 +161,9 @@ export default function WebtoonStudio(){
     setStoryBible(snapshot.story.bible)
     setLoadedStoryVersion(key)
   },[snapshot?.projectId,snapshot?.story?.version,loadedStoryVersion])
+  useEffect(()=>{
+    if(snapshot?.draftCasting)setCastSuggestions(snapshot.draftCasting)
+  },[snapshot?.projectId,snapshot?.draftCasting])
   const assetForPanel=(panelId:string)=>snapshot?.catalog.assets.filter(a=>
     a.kind==='previous-panel'&&a.ownerId===panelId&&(a.status==='draft'||a.status==='approved')).at(-1)
   const saveBubble=(panelId:string,bubble:BubblePlan,text:string,box=bubble.box)=>{
@@ -630,7 +633,7 @@ export default function WebtoonStudio(){
         <p className="text-sm text-stone-600">LLM이 캐릭터 외형과 주요 장소를 제안해. 아래 제안은 아직 기준 이미지가 아니며, 이미지를 생성·확인·승인해야 고정 원본이 돼.</p>
         <button className="border rounded px-3 py-2 disabled:opacity-40" disabled={busy||!storyGoal.trim()}
           onClick={()=>void run('suggestCast',{storyGoal,storyBibleSummary:storyBible},
-            data=>setCastSuggestions(data as CastProposals))}>스토리 기반 주요 캐릭터·장소 설계</button>
+            data=>setCastSuggestions(data.draftCasting as CastProposals))}>스토리 기반 주요 캐릭터·장소 설계</button>
         {castSuggestions&&<div className="grid md:grid-cols-2 gap-3 text-sm">
           <div className="space-y-2">
             <h3 className="font-semibold">캐릭터 제안</h3>

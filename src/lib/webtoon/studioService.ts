@@ -367,11 +367,14 @@ export async function planOneWebtoonPairStep(projectId:string,episodeId:string,s
 }
 
 /** LLM casting proposal only; no character/location is registered without an approved image. */
-export async function suggestWebtoonCast(story:string,bible:string){
-  return proposeCast(story,bible,({systemPrompt,userPrompt,maxNewTokens})=>predict({
+export async function suggestWebtoonCast(projectId:string,story:string,bible:string){
+  const suggestions=await proposeCast(story,bible,({systemPrompt,userPrompt,maxNewTokens})=>predict({
     systemPrompt,userPrompt,nbMaxNewTokens:maxNewTokens,
     llmVendorConfig:{vendor:'SERVER',apiKey:'',modelId:''}
   }))
+  const snapshot=await store.read(projectId)
+  // Suggestions are unapproved metadata, never canonical image masters.
+  return store.saveCasting(projectId,snapshot.revision,suggestions)
 }
 
 export async function saveWebtoonStory(projectId:string,premise:string,bible:string){
