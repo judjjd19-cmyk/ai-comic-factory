@@ -152,8 +152,16 @@ export class ProjectStore {
   async read(projectId: string): Promise<ProjectSnapshot> {
     return structuredClone(await this.readRaw(projectId))
   }
-  async appendPair(projectId: string, expectedRevision: number, plan: PairPlan): Promise<ProjectSnapshot> {
+  async appendPair(projectId: string, expectedRevision: number, plan: PairPlan,
+    episodeStart?:{targetPairs:number;startState:import('./contracts.ts').SceneState}): Promise<ProjectSnapshot> {
     return this.modify(projectId, expectedRevision, snapshot => {
+      if(episodeStart){
+        snapshot.series ||= emptySeries()
+        if(snapshot.pairs.length&&!snapshot.series.episodes.length)
+          throw Error('Legacy pairs require migration before a new episode')
+        beginEpisode(snapshot.series,{id:plan.episodeId,targetPairs:episodeStart.targetPairs,
+          startState:episodeStart.startState})
+      }
       if (snapshot.pairs.some(item => item.plan.id === plan.id)) throw new Error('Duplicate pair ID')
       const existingPanelIds=new Set(snapshot.pairs.flatMap(p=>p.plan.panels.map(panel=>panel.id)))
       if(plan.panels.some(panel=>existingPanelIds.has(panel.id)))
@@ -200,7 +208,9 @@ export class ProjectStore {
       const pair = snapshot.pairs.find(entry => entry.plan.id === pairId)
       if (!pair) throw new Error('Unknown pair')
       const expected = panelIndex === 0 ? 'review_first' : 'review_second'
-      if (pair.job.status !== expected) throw new Error('Image stage requires matching review state')
+      const rendering=panelIndex===0?'rendering_first':'rendering_second'
+      if (pair.job.status !== expected && pair.job.status !== rendering)
+        throw new Error('Image stage requires rendering or review state')
       if (snapshot.catalog.assets.some(a => a.id === assetId)) throw new Error('Image already staged')
       const mediaDir = join(this.dir(projectId), 'assets')
       await mkdir(mediaDir, {recursive: true})
@@ -209,6 +219,8 @@ export class ProjectStore {
       catch(e) { if ((e as NodeJS.ErrnoException).code !== 'EEXIST') throw e }
       // Verify even when a file with the same hash-named path already exists.
       if (hash(await readFile(file)) !== digest) throw new Error('Image store checksum mismatch')
+      if(pair.job.status===rendering)
+        pair.job=transitionPairJob(pair.job,panelIndex===0?'review_first':'review_second')
       snapshot.catalog.assets.push({id:assetId,kind:'previous-panel',ownerId:pair.plan.panels[panelIndex].id,
         uri:'assets/' + digest + '.' + extension,sha256:digest,status:'draft',version:1})
     })
@@ -402,6 +414,8 @@ export class ProjectStore {
         throw new Error('Cannot overwrite approved location')
       const character=snapshot.catalog.characters.find(c=>c.id===input.ownerId)
       if((input.kind==='outfit'||input.kind==='view')&&!character)throw new Error('Unknown character')
+      if(input.kind==='outfit'&&!input.outfitId)throw new Error('Outfit ID required')
+      if(input.kind==='view'&&!input.view)throw new Error('View angle required')
       const dir=join(this.dir(projectId),'refs')
       await mkdir(dir,{recursive:true})
       const file=join(dir,sha+'.'+ext)
@@ -448,8 +462,11 @@ export class ProjectStore {
       if(!asset||asset.status!=='draft'||!['view','outfit'].includes(asset.kind))throw new Error('Draft view/outfit required')
       const character=snapshot.catalog.characters.find(c=>c.id===asset.ownerId)
       if(!character||character.version!==asset.version)throw new Error('Invalid character version')
-      if(asset.kind==='outfit'&&!character.outfitIds.includes(asset.outfitId||''))throw new Error('Unknown outfit')
+      if(asset.kind==='outfit'&&!asset.outfitId)throw new Error('Outfit reference needs an outfit ID')
+      if(asset.kind==='view'&&!asset.view)throw new Error('View reference needs an explicit angle')
       await this.verifiedAsset(projectId,asset)
+      if(asset.kind==='outfit'&&!character.outfitIds.includes(asset.outfitId!))
+        character.outfitIds.push(asset.outfitId!)
       asset.status='approved'
     })
   }
