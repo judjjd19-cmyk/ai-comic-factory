@@ -22,6 +22,7 @@ webtoon_typecheck_build:
     - npm ci
     - npx tsc --noEmit
     - npm run build
+    - node --test tests/webtoon-live-api-smoke.mjs
 
 # Optional one-time upstream Git history import; never overwrites main.
 import_upstream:
