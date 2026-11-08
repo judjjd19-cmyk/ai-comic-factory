@@ -4,6 +4,7 @@ import {mkdir,readFile,writeFile,rename,rm,stat} from 'node:fs/promises'
 import sharp from 'sharp'
 import {inspectLayout} from './panelQA'
 import {episodePairId, nextEpisodeId, type EpisodeCompletion} from './seriesLoop'
+import {seriesNarrativeContext} from './seriesNarrative'
 import {uploadSelectedReferences} from './comfyReference'
 import {makeActorMask,uploadActorMask} from './regionMasks'
 import type {PanelPlan,SelectedReference} from './contracts'
@@ -166,8 +167,9 @@ export async function planWebtoonPair(projectId:string,storyGoal:string,episodeI
   if(active&&pairIndex>=active.targetPairs)throw Error('Episode already has the planned number of pairs')
   const input={
     pairId,episodeId,storyGoal,storyBibleSummary,
-    approvedHistorySummary:snapshot.pairs.slice(-8).map(p=>
-      p.plan.panels.map(x=>x.summary+' '+x.bubbles.map(b=>b.text).join(' ')).join(' / ')).join('\n'),
+    approvedHistorySummary:('CANONICAL_EPISODE_MEMORY: '+seriesNarrativeContext(snapshot.series)+'\n'+
+      snapshot.pairs.slice(-8).map(p=>
+        p.plan.panels.map(x=>x.summary+' '+x.bubbles.map(b=>b.text).join(' ')).join(' / ')).join('\n')).slice(0,10000),
     before:last?.plan.after||initial,catalog:snapshot.catalog
   }
   const plan:PairPlan=await generatePairPlan(input,({systemPrompt,userPrompt,maxNewTokens})=>predict({
@@ -341,7 +343,9 @@ export async function saveWebtoonStory(projectId:string,premise:string,bible:str
 
 export async function createWebtoonEpisodeOutline(projectId:string,episodeId:string,premise:string,bible:string){
   const snapshot=await store.read(projectId)
-  const outline=await designEpisodeOutline(episodeId,premise,bible,snapshot.catalog,
+  const carryover=seriesNarrativeContext(snapshot.series)
+  const outline=await designEpisodeOutline(episodeId,premise,
+    (bible+'\nCANONICAL_PREVIOUS_EPISODE_MEMORY: '+carryover).slice(0,15000),snapshot.catalog,
     ({systemPrompt,userPrompt,maxNewTokens})=>predict({
       systemPrompt,userPrompt,nbMaxNewTokens:maxNewTokens,
       llmVendorConfig:{vendor:'SERVER',apiKey:'',modelId:''}
