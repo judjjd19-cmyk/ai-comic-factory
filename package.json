@@ -6,7 +6,8 @@
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
-    "lint": "next lint"
+    "lint": "next lint",
+    "test:webtoon": "node --experimental-strip-types --test tests/webtoon-*.test.mjs"
   },
   "dependencies": {
     "@aitube/clap": "0.2.4",
