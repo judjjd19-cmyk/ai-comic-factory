@@ -84,6 +84,7 @@ export default function WebtoonStudio(){
   const [qaIssues,setQaIssues]=useState<Array<{severity:string;code:string;message:string}>>([])
   const stripRef=useRef<HTMLDivElement>(null)
   const renderPollingRef=useRef(false)
+  const masterPollingRef=useRef(false)
   const [pollFailed,setPollFailed]=useState(false)
   const cancelPlanningRef=useRef(false)
 
@@ -230,6 +231,28 @@ export default function WebtoonStudio(){
     },3500)
     return()=>{disposed=true;clearInterval(timer)}
   },[authorized,projectId,busy,pollFailed,lastPair?.plan.id,lastPair?.job.status,refresh])
+  useEffect(()=>{
+    if(!authorized||busy||!masterPromptId||generated)return
+    let cancelled=false
+    const timer=setInterval(()=>{
+      if(masterPollingRef.current)return
+      masterPollingRef.current=true
+      void request('pollMaster',{promptId:masterPromptId})
+        .then(data=>{
+          if(cancelled)return
+          if(data.status==='completed'&&data.assetUrl){
+            setGenerated(data.assetUrl)
+            setMasterPromptId('')
+            setMessage('기준 이미지 초안 생성 완료. 이미지 확인 후 등록·승인해.')
+          }else if(data.status==='error'){
+            setMessage('기준 이미지 생성 오류: '+data.error)
+            setMasterPromptId('')
+          }
+        }).catch(e=>{if(!cancelled)setMessage('기준 이미지 상태 조회 실패: '+String(e))})
+        .finally(()=>{masterPollingRef.current=false})
+    },3500)
+    return()=>{cancelled=true;clearInterval(timer)}
+  },[authorized,busy,masterPromptId,generated])
   const approvePanel=async(pairId:string,index:0|1,assetId:string)=>{
     if(!reviewCheck)return
     await run('approvePanel',{pairId,panelIndex:index,assetId},()=>setReviewCheck(false))
