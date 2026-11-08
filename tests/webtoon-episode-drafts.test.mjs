@@ -4,7 +4,7 @@ import {mkdtemp,rm} from 'node:fs/promises'
 import {tmpdir} from 'node:os'
 import {join} from 'node:path'
 import {ProjectStore} from '../src/lib/webtoon/projectStore.ts'
-import {generateEpisodeDrafts,activateNextEpisodeDraft,readEpisodeDrafts} from '../src/lib/webtoon/episodeDrafts.ts'
+import {generateEpisodeDrafts,activateNextEpisodeDraft,readEpisodeDrafts,saveEpisodeOutline} from '../src/lib/webtoon/episodeDrafts.ts'
 const catalog={characters:[{id:'hero',version:1,displayName:'주인공',description:'black hair',outfitIds:['uniform'],identityReferenceId:'face'}],
  locations:[{id:'room',version:1,description:'room',referenceIds:[]}],
  assets:[{id:'face',kind:'identity',ownerId:'hero',uri:'refs/a.png',sha256:'a'.repeat(64),status:'approved',version:1}]}
@@ -66,4 +66,18 @@ test('concurrent planning for one episode is rejected instead of duplicating pai
  release()
  assert.equal((await first).plans.length,1)
  assert.equal((await generateEpisodeDrafts(options,llm,store)).plans.length,2)
+}))
+
+test('episode outline is promoted into canonical series on first pair activation',()=>setup(async store=>{
+ const stages=['opening','inciting','escalation','climax','hook']
+ const outline={episodeId:'episode1',theme:'미스터리',stakes:'누가 비밀을 숨겼나',recommendedPairs:1,
+   beats:stages.map(stage=>({stage,event:stage+' 사건',characterIds:['hero'],locationId:'room',emotionalChange:'긴장'}))}
+ await saveEpisodeOutline('book','episode1','비밀','세계관',outline,store)
+ const draft=await generateEpisodeDrafts({
+   projectId:'book',episodeId:'episode1',storyGoal:'비밀',storyBible:'세계관',pairCount:1
+ },llm,store)
+ assert.equal(draft.outline.beats.length,5)
+ const {snapshot}=await activateNextEpisodeDraft('book','episode1',store)
+ assert.equal(snapshot.series.episodes[0].outline.theme,'미스터리')
+ assert.equal(snapshot.series.episodes[0].outline.beats[4].stage,'hook')
 }))
