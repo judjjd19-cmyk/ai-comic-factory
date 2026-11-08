@@ -54,6 +54,7 @@ export default function WebtoonStudio(){
   const [remainingDrafts,setRemainingDrafts]=useState<number|null>(null)
   const [storyBible,setStoryBible]=useState('')
   const [reviewCheck,setReviewCheck]=useState(false)
+  const [rejectReason,setRejectReason]=useState('인물 외형 또는 구도가 콘티와 다름')
   const [qaIssues,setQaIssues]=useState<Array<{severity:string;code:string;message:string}>>([])
   const stripRef=useRef<HTMLDivElement>(null)
 
@@ -310,6 +311,12 @@ export default function WebtoonStudio(){
               <button className="rounded border px-3 py-2" disabled={!image||busy}
                 onClick={()=>image&&void run('inspectPanel',{pairId:lastPair.plan.id,panelIndex:idx,assetId:image.id},
                   data=>setQaIssues(data.issues))}>기계적 QA 검사</button>
+              <input className="border rounded p-2 text-xs" aria-label="반려 이유"
+                value={rejectReason} onChange={e=>setRejectReason(e.target.value)}/>
+              <button className="rounded border border-red-500 text-red-700 px-3 py-2 disabled:opacity-40"
+                disabled={!image||busy||!rejectReason.trim()}
+                onClick={()=>image&&void run('rejectPanel',{pairId:lastPair.plan.id,panelIndex:idx,
+                  assetId:image.id,reason:rejectReason},()=>{setReviewCheck(false);setQaIssues([])})}>반려 후 해당 컷 재생성</button>
               <button className="rounded bg-stone-900 text-white px-4 py-2 disabled:opacity-40"
                 disabled={!reviewCheck||busy||!image}
                 onClick={()=>image&&void approvePanel(lastPair.plan.id,idx,image.id)}>{idx+1}컷 승인</button>

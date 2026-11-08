@@ -26,6 +26,7 @@ export interface ProjectSnapshot {
   pairs: PairRecord[]
   approvedPanels: ApprovedPanel[]
   bubbleOverrides?: Record<string, Record<string, {text:string;box:[number,number,number,number]}>>
+  rejections?: Array<{panelId:string;assetId:string;reason:string;at:string}>
 }
 
 type NonApprovalEvent = Exclude<PairJobEvent, 'approve_first' | 'approve_second' | 'validate'>
@@ -302,6 +303,25 @@ export class ProjectStore {
       snapshot.bubbleOverrides ||= {}
       snapshot.bubbleOverrides[panelId] ||= {}
       snapshot.bubbleOverrides[panelId][bubbleId]={text,box}
+    })
+  }
+
+
+  async rejectPanel(projectId:string,rev:number,pairId:string,panelIndex:0|1,assetId:string,reason:string):Promise<ProjectSnapshot>{
+    if(!reason.trim()||reason.length>1200)throw Error('Rejection reason is required')
+    return this.modify(projectId,rev,snapshot=>{
+      const pair=snapshot.pairs.find(p=>p.plan.id===pairId)
+      if(!pair)throw Error('Unknown pair')
+      const status=panelIndex===0?'review_first':'review_second'
+      if(pair.job.status!==status)throw Error('Cannot reject in this pair state')
+      const panel=pair.plan.panels[panelIndex]
+      const asset=snapshot.catalog.assets.find(a=>a.id===assetId)
+      if(!asset||asset.ownerId!==panel.id||asset.kind!=='previous-panel'||asset.status!=='draft')
+        throw Error('Cannot reject an unmatching or approved image')
+      asset.status='rejected'
+      pair.job=transitionPairJob(pair.job,panelIndex===0?'retry_first':'retry_second')
+      snapshot.rejections ||= []
+      snapshot.rejections.push({panelId:panel.id,assetId,reason:reason.trim(),at:new Date().toISOString()})
     })
   }
 

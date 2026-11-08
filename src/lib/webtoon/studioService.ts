@@ -174,6 +174,16 @@ export async function approveWebtoonPanel(projectId:string,pairId:string,panelIn
   const snapshot=await store.read(projectId)
   return store.approvePanel(projectId,snapshot.revision,pairId,panelIndex,assetId,reviewer)
 }
+export async function rejectWebtoonPanel(projectId:string,pairId:string,panelIndex:0|1,assetId:string,reason:string){
+  const snapshot=await store.read(projectId)
+  const updated=await store.rejectPanel(projectId,snapshot.revision,pairId,panelIndex,assetId,reason)
+  const task=await getTask(projectId,pairId,panelIndex)
+  if(task){
+    const file=taskPath(projectId,pairId,panelIndex)
+    await rename(file,file+'.rejected.'+updated.revision)
+  }
+  return updated
+}
 export async function editWebtoonBubble(projectId:string,panelId:string,bubbleId:string,text:string,
   box:[number,number,number,number]){
   const snapshot=await store.read(projectId)

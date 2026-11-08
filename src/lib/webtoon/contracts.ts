@@ -280,7 +280,7 @@ export function selectReferences(
 export type PairJobStatus = 'planned' | 'validated' | 'rendering_first' | 'review_first' |
   'first_approved' | 'rendering_second' | 'review_second' | 'approved' | 'blocked'
 export type PairJobEvent = 'validate' | 'render_first' | 'review_first' | 'approve_first' |
-  'render_second' | 'review_second' | 'approve_second' | 'block'
+  'render_second' | 'review_second' | 'approve_second' | 'retry_first' | 'retry_second' | 'block'
 
 export interface PairJob {
   id: string
@@ -299,6 +299,8 @@ export function transitionPairJob(job: PairJob, event: PairJobEvent, assetId?: s
     render_second: { first_approved: 'rendering_second' },
     review_second: { rendering_second: 'review_second' },
     approve_second: { review_second: 'approved' },
+    retry_first: { review_first: 'rendering_first' },
+    retry_second: { review_second: 'rendering_second' },
     block: { planned: 'blocked', validated: 'blocked', rendering_first: 'blocked', review_first: 'blocked', first_approved: 'blocked', rendering_second: 'blocked', review_second: 'blocked' },
   }
   const target = transitions[event][job.status]

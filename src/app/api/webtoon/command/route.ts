@@ -2,7 +2,7 @@ import {
   listWebtoonProjects,createWebtoonProject,webtoonSnapshot,stageWebtoonMaster,
   approveWebtoonCharacter,approveWebtoonLocation,approveWebtoonSupplement,
   generateMasterImage,pollMasterImage,planWebtoonPair,startWebtoonPanel,
-  pollWebtoonPanel,approveWebtoonPanel,editWebtoonBubble,
+  pollWebtoonPanel,approveWebtoonPanel,rejectWebtoonPanel,editWebtoonBubble,
   planEntireWebtoonEpisode,nextPlannedWebtoonPair,savedWebtoonEpisodeDrafts,inspectWebtoonPanel,
 } from '@/lib/webtoon/studioService'
 
@@ -80,6 +80,8 @@ export async function POST(request:Request){
         data=await pollWebtoonPanel(projectId,str(body.pairId),index(body.panelIndex));break
       case 'inspectPanel':
         data=await inspectWebtoonPanel(projectId,str(body.pairId),index(body.panelIndex),assetId);break
+      case 'rejectPanel':
+        data=await rejectWebtoonPanel(projectId,str(body.pairId),index(body.panelIndex),assetId,str(body.reason));break
       case 'approvePanel':
         data=await approveWebtoonPanel(projectId,str(body.pairId),index(body.panelIndex),
           assetId,str(body.reviewer)||'local-reviewer');break
