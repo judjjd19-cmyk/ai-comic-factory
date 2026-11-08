@@ -6,6 +6,7 @@ import {generatePairPlan,type PairPlannerInput,type PlannerMessages} from './pai
 import type {PairPlan,SceneState,WebtoonCatalog} from './contracts.ts'
 import {type EpisodeOutline,outlineBeatForPair} from './storyOutline.ts'
 import {episodePairId} from './seriesLoop.ts'
+import {seriesNarrativeContext} from './seriesNarrative.ts'
 
 const id=(s:string)=>{if(!/^[A-Za-z0-9][A-Za-z0-9_-]{0,79}$/.test(s))throw Error('Invalid identifier');return s}
 const hash=(value:unknown)=>createHash('sha256').update(JSON.stringify(value)).digest('hex')
@@ -95,7 +96,7 @@ export async function generateEpisodeDrafts(input:{projectId:string;episodeId:st
     store=new ProjectStore()):Promise<EpisodeDrafts>{
   const {projectId,episodeId,storyGoal,storyBible}=input
   id(projectId);id(episodeId)
-  if(!Number.isInteger(input.pairCount)||input.pairCount<1||input.pairCount>50)throw Error('Invalid pair count')
+  if(!Number.isInteger(input.pairCount)||input.pairCount<1||input.pairCount>250)throw Error('Invalid pair count')
   const step=input.maxNewPairs??input.pairCount
   if(!Number.isInteger(step)||step<1||step>50)throw Error('Invalid planning batch size')
   if(!storyGoal.trim()||storyGoal.length>5000||storyBible.length>15000)throw Error('Invalid episode story')
@@ -136,8 +137,11 @@ export async function generateEpisodeDrafts(input:{projectId:string;episodeId:st
     const direction=beat?'\nCURRENT_EPISODE_BEAT: '+JSON.stringify(beat)+
       '\nFULL_EPISODE_ARC: '+draft.outline!.beats.map(b=>b.stage+'='+b.event).join(' | ').slice(0,2500)+
       '\nEPISODE_THEME: '+draft.outline!.theme+'; STAKES: '+draft.outline!.stakes:''
-    const plannerInput:PairPlannerInput={pairId,episodeId,storyGoal,storyBibleSummary:storyBible+direction,
-      approvedHistorySummary:draft.plans.slice(-6).map(p=>p.panels.map(q=>q.summary).join(' / ')).join('\n'),
+    const seriesMemory=seriesNarrativeContext(snapshot.series)
+    const plannerInput:PairPlannerInput={pairId,episodeId,storyGoal,
+      storyBibleSummary:(storyBible+direction).slice(0,15000),
+      approvedHistorySummary:('CANONICAL_PREVIOUS_EPISODES: '+seriesMemory+'\n'+
+        draft.plans.slice(-6).map(p=>p.panels.map(q=>q.summary).join(' / ')).join('\n')).slice(0,10000),
       before,catalog:snapshot.catalog}
     const plan=await generatePairPlan(plannerInput,llm)
     draft.plans.push(plan)
