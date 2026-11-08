@@ -62,7 +62,11 @@ export async function prepareComfyUIWorkflow(prompt: string, width: number, heig
   let workflow = parsed as Workflow
   const samplers = nodesByType(workflow, ["KSampler", "KSamplerAdvanced"])
   const samplerId = process.env.COMFYUI_SAMPLER_NODE_ID || samplers[0]?.[0]
-  if (!samplerId || !workflow[samplerId]) throw new Error("Workflow needs a KSampler node")
+  if(!process.env.COMFYUI_SAMPLER_NODE_ID && samplers.length!==1)
+    throw new Error("Specify a single KSampler or COMFYUI_SAMPLER_NODE_ID for ambiguous workflows")
+  if (!samplerId || !workflow[samplerId] ||
+      !["KSampler","KSamplerAdvanced"].includes(workflow[samplerId].class_type))
+    throw new Error("Workflow needs a valid configured KSampler node")
   const sampler = workflow[samplerId].inputs
   const positiveId = nodeForText(workflow, sampler, "positive")
   const negativeId = nodeForText(workflow, sampler, "negative")
@@ -111,7 +115,8 @@ export async function prepareComfyUIWorkflow(prompt: string, width: number, heig
     inputs.strength_model = numeric(process.env.COMFYUI_STYLE_LORA_STRENGTH, 0.8)
     inputs.strength_clip = numeric(process.env.COMFYUI_STYLE_LORA_CLIP_STRENGTH, 0.8)
   }
-  if (!nodesByType(workflow, ["SaveImage"]).length) throw new Error("Workflow must contain SaveImage")
+  if (nodesByType(workflow, ["SaveImage"]).length!==1)
+    throw new Error("Webtoon workflow must have exactly one SaveImage output for deterministic review")
   if (references?.uploaded.length && references.auto) {
     workflow = buildAutoIPAdapter(workflow,references.uploaded,references.auto.panel,references.auto.masks,
       process.env.COMFYUI_IPADAPTER_FILE || 'ip-adapter-plus_sdxl_vit-h.safetensors',
@@ -186,8 +191,9 @@ export async function pollComfyUI(promptId: string): Promise<RenderedScene> {
   url.searchParams.set("type", selected.type || "output")
   const img = await fetch(url, { cache: "no-store" })
   if (!img.ok) throw new Error("ComfyUI output retrieval failed (" + img.status + ")")
-  const contentType = img.headers.get("content-type") || "image/png"
-  if (!contentType.startsWith("image/")) throw new Error("ComfyUI returned non-image content")
+  const contentType = (img.headers.get("content-type")||"image/png").split(";")[0].trim().toLowerCase()
+  if (!["image/png","image/jpeg","image/webp"].includes(contentType))
+    throw new Error("ComfyUI returned an unsupported image type: "+contentType)
   const assetUrl = "data:" + contentType + ";base64," + Buffer.from(await img.arrayBuffer()).toString("base64")
   return scene(promptId, "completed", "", assetUrl)
 }
