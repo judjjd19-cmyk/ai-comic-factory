@@ -1,4 +1,4 @@
-import {mkdir,readFile,writeFile,rename,rm,stat} from 'node:fs/promises'
+import {mkdir,readFile,writeFile,rename,rm,stat,readdir} from 'node:fs/promises'
 import {resolve,join,dirname} from 'node:path'
 import {createHash,randomUUID} from 'node:crypto'
 import {ProjectStore} from './projectStore.ts'
@@ -91,13 +91,34 @@ async function withDraftLock<T>(file:string,action:()=>Promise<T>):Promise<T>{
   }
   throw new Error('Could not acquire episode planner lock')
 }
+
+async function rejectUnfinishedParallelDrafts(projectId:string,currentEpisodeId:string,
+  completedIds:Set<string>):Promise<void>{
+  const directory=join(root(),id(projectId),'drafts')
+  for(const filename of await readdir(directory).catch(e=>{
+    if((e as NodeJS.ErrnoException).code==='ENOENT')return [] as string[]
+    throw e
+  })){
+    if(!filename.endsWith('.json')||filename===id(currentEpisodeId)+'.json')continue
+    try{
+      const other=JSON.parse(await readFile(join(directory,filename),'utf8')) as EpisodeDrafts
+      if(other.episodeId!==currentEpisodeId&&!completedIds.has(other.episodeId)&&
+         Array.isArray(other.plans)&&other.plans.length>0)
+        throw Error('Complete the earlier drafted episode '+other.episodeId+
+          ' before planning '+currentEpisodeId)
+    }catch(e){
+      if(e instanceof SyntaxError)throw Error('Corrupted existing episode draft '+filename)
+      throw e
+    }
+  }
+}
 export async function generateEpisodeDrafts(input:{projectId:string;episodeId:string;storyGoal:string;
     storyBible:string;pairCount:number;locationId?:string;maxNewPairs?:number},llm:(messages:PlannerMessages)=>Promise<string>,
     store=new ProjectStore()):Promise<EpisodeDrafts>{
   const {projectId,episodeId,storyGoal,storyBible}=input
   id(projectId);id(episodeId)
   if(!Number.isInteger(input.pairCount)||input.pairCount<1||input.pairCount>250)throw Error('Invalid pair count')
-  const step=input.maxNewPairs??input.pairCount
+  const step=input.maxNewPairs??Math.min(input.pairCount,50)
   if(!Number.isInteger(step)||step<1||step>50)throw Error('Invalid planning batch size')
   if(!storyGoal.trim()||storyGoal.length>5000||storyBible.length>15000)throw Error('Invalid episode story')
   return withDraftLock(path(projectId,episodeId),async()=>{
@@ -108,6 +129,8 @@ export async function generateEpisodeDrafts(input:{projectId:string;episodeId:st
     throw Error('Complete the active episode before planning the next episode')
   if(series?.episodes.some(e=>e.id===episodeId&&e.status==='completed'))
     throw Error('Completed episodes cannot be regenerated in place')
+  await rejectUnfinishedParallelDrafts(projectId,episodeId,
+    new Set(series?.episodes.filter(e=>e.status==='completed').map(e=>e.id)||[]))
   const catalogHash=masterHash(snapshot.catalog)
   const file=path(projectId,episodeId)
   let draft=await readEpisodeDrafts(projectId,episodeId)
