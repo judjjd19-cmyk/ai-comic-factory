@@ -195,48 +195,55 @@ export async function generateEpisodeDrafts(input:{projectId:string;episodeId:st
     }))
 }
 /** Activate exactly one saved pair; first activation records the entire episode lifecycle. */
+/** Apply exactly one approved next pair. The first pair registers its episode atomically. */
 export async function activateNextEpisodeDraft(projectId:string,episodeId:string,store=new ProjectStore()){
   id(projectId);id(episodeId)
   return withDraftLock(join(root(),id(projectId),'drafts','.series-global-lock-target'),async()=>
     withDraftLock(path(projectId,episodeId),async()=>{
-    const draft=await readEpisodeDrafts(projectId,episodeId)
-    if(!draft)throw Error('No saved episode plan')
-    if(!draft.targetPairs||draft.plans.length!==draft.targetPairs)
-      throw Error('All planned two-panel pairs must be saved before starting image production')
-    let snapshot=await store.read(projectId)
-    if(masterHash(snapshot.catalog)!==draft.catalogHash)throw Error('Masters changed since episode planning')
-    const existing=snapshot.series?.episodes.find(x=>x.id===episodeId)
-    if(existing?.status==='completed')throw Error('Episode was already finalized')
-    if(!existing){
-      const predecessor=snapshot.series?.episodes.at(-1)
-      if(predecessor&&predecessor.status!=='completed')
-        throw Error('Finish the preceding episode before activating the next')
-      snapshot=await store.beginEpisode(projectId,snapshot.revision,{
-        episodeId,targetPairs:draft.targetPairs,startState:draft.plans[0].before,
-        ...(draft.outline?{outline:draft.outline}:{})
-      })
-    }
-    const current=snapshot.series?.episodes.find(x=>x.id===episodeId)
-    if(!current||current.targetPairs!==draft.targetPairs)throw Error('Episode record mismatch')
-    let cursor=draft.cursor
-    while(cursor<draft.plans.length&&current.pairIds.includes(draft.plans[cursor].id))cursor++
-    if(cursor>=draft.plans.length){
-      if(draft.cursor!==cursor){
-        draft.cursor=cursor;draft.updatedAt=new Date().toISOString()
-        await save(path(projectId,episodeId),draft)
+      const draft=await readEpisodeDrafts(projectId,episodeId)
+      if(!draft)throw Error('No saved episode plan')
+      if(!draft.targetPairs||draft.plans.length!==draft.targetPairs)
+        throw Error('All planned two-panel pairs must be saved before starting image production')
+      const snapshot=await store.read(projectId)
+      if(masterHash(snapshot.catalog)!==draft.catalogHash)
+        throw Error('Approved masters changed since episode planning')
+      const episode=snapshot.series?.episodes.find(e=>e.id===episodeId)
+      if(episode?.status==='completed')throw Error('Episode already finalized')
+      if(episode&&episode.targetPairs!==draft.targetPairs)
+        throw Error('Episode length changed since image production began')
+      if(!episode&&snapshot.series?.episodes.some(e=>e.status==='producing'))
+        throw Error('Finish the preceding active episode first')
+      // Manifest is the durable authority; the secondary draft cursor may lag
+      // when a process stops after appendPair but before the JSON cursor write.
+      const activated=episode?.pairIds.length||0
+      for(let i=0;i<activated;i++){
+        if(episode!.pairIds[i]!==draft.plans[i]?.id||
+          !snapshot.pairs.some(p=>p.plan.id===episode!.pairIds[i]))
+          throw Error('Saved episode pairs diverged from the canonical manifest')
       }
-      return{snapshot,remaining:0}
-    }
-    const previous=snapshot.pairs.at(-1)
-    if(previous&&previous.job.status!=='approved')
-      throw Error('Previous two-panel pair needs both approved images')
-    const plan=draft.plans[cursor]
-    if(previous&&JSON.stringify(previous.plan.after)!==JSON.stringify(plan.before))
-      throw Error('Approved scene diverged from planned continuation')
-    const updated=await store.appendPair(projectId,snapshot.revision,plan)
-    draft.cursor=cursor+1
-    draft.updatedAt=new Date().toISOString()
-    await save(path(projectId,episodeId),draft)
-    return{snapshot:updated,remaining:draft.plans.length-draft.cursor}
+      if(activated>=draft.plans.length){
+        if(draft.cursor!==activated){
+          draft.cursor=activated
+          draft.updatedAt=new Date().toISOString()
+          await save(path(projectId,episodeId),draft)
+        }
+        return{snapshot,remaining:0}
+      }
+      const plan=draft.plans[activated]
+      const previous=snapshot.pairs.at(-1)
+      if(previous&&previous.job.status!=='approved')
+        throw Error('The preceding pair must have two approved images')
+      if(previous&&JSON.stringify(previous.plan.after)!==JSON.stringify(plan.before))
+        throw Error('Approved state differs from the next two-panel plan')
+      const first=!episode?{
+        targetPairs:draft.targetPairs,startState:draft.plans[0].before
+      }:undefined
+      // Single manifest transaction: either episode+first pair are both recorded,
+      // or neither exists. Never strand a newly begun empty episode.
+      const updated=await store.appendPair(projectId,snapshot.revision,plan,first)
+      draft.cursor=activated+1
+      draft.updatedAt=new Date().toISOString()
+      await save(path(projectId,episodeId),draft)
+      return{snapshot:updated,remaining:draft.plans.length-draft.cursor}
     }))
 }
