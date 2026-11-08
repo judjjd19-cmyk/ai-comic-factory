@@ -26,6 +26,7 @@ export interface ProjectSnapshot {
   catalog: WebtoonCatalog
   pairs: PairRecord[]
   approvedPanels: ApprovedPanel[]
+  story?: { premise:string; bible:string; updatedAt:string; version:number }
   bubbleOverrides?: Record<string, Record<string, {text:string;box:[number,number,number,number]}>>
   rejections?: Array<{panelId:string;assetId:string;reason:string;at:string}>
   draftCasting?: CastProposals
@@ -335,6 +336,17 @@ export class ProjectStore {
     return this.modify(projectId,revision,snapshot=>{
       // Casting drafts never mutate approved canonical identity/locations.
       snapshot.draftCasting=structuredClone(proposals)
+    })
+  }
+
+  /** Persist author intent independently of generated visual artifacts. */
+  async updateStory(projectId:string,revision:number,premise:string,bible:string):Promise<ProjectSnapshot>{
+    if(!premise.trim()||premise.length>5000||bible.length>15000)
+      throw new Error('Story premise/bible length invalid')
+    return this.modify(projectId,revision,snapshot=>{
+      const version=(snapshot.story?.version||0)+1
+      snapshot.story={premise:premise.trim(),bible:bible.trim(),
+        updatedAt:new Date().toISOString(),version}
     })
   }
 
