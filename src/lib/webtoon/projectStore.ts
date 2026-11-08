@@ -69,10 +69,45 @@ export class ProjectStore {
     const directory = this.dir(projectId)
     await mkdir(directory, { recursive: true })
     const lockDir = join(directory, '.manifest-lock')
-    try { await mkdir(lockDir) }
-    catch (e) { throw new Error('Project is locked by another writer: ' + String(e)) }
-    try { return await action() }
-    finally { await rm(lockDir, { recursive: true, force: true }) }
+    let acquired=false
+    for(let attempt=0;attempt<3&&!acquired;attempt++){
+      try{
+        await mkdir(lockDir)
+        acquired=true
+        await writeFile(join(lockDir,'owner.json'),JSON.stringify({
+          pid:process.pid,started:Date.now()
+        }),{flag:'wx'})
+      }catch(e){
+        if(acquired){
+          await rm(lockDir,{recursive:true,force:true})
+          throw e
+        }
+        if((e as NodeJS.ErrnoException).code!=='EEXIST')throw e
+        const info=await stat(lockDir).catch(()=>null)
+        if(!info)continue
+        let pid=0
+        try{pid=Number(JSON.parse(await readFile(join(lockDir,'owner.json'),'utf8')).pid)}
+        catch{}
+        let running=false
+        if(Number.isInteger(pid)&&pid>1){
+          try{process.kill(pid,0);running=true}
+          catch(error){running=(error as NodeJS.ErrnoException).code==='EPERM'}
+        }
+        if(running||Date.now()-info.mtimeMs<15_000)
+          throw new Error('Project is locked by another active writer')
+        // Rename stale lock before removal so a newly acquired lock is not removed.
+        const abandoned=lockDir+'.abandoned-'+randomUUID()
+        try{
+          await rename(lockDir,abandoned)
+          await rm(abandoned,{recursive:true,force:true})
+        }catch(error){
+          if((error as NodeJS.ErrnoException).code!=='ENOENT')throw error
+        }
+      }
+    }
+    if(!acquired)throw new Error('Unable to recover project write lock')
+    try{return await action()}
+    finally{await rm(lockDir,{recursive:true,force:true})}
   }
   private async modify(projectId: string, expectedRevision: number, change: (s: ProjectSnapshot) => void | Promise<void>): Promise<ProjectSnapshot> {
     return this.locked(projectId, async () => {
