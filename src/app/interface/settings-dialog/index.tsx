@@ -195,7 +195,7 @@ export function SettingsDialog() {
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>
-                <SelectItem value="SERVER">Default Hugging Face server (free but limited capacity, not always online)</SelectItem>
+                <SelectItem value="SERVER">Configured server (local ComfyUI when enabled)</SelectItem>
                 <SelectItem value="HUGGINGFACE">Custom Inference API model (pro hugging face account recommended)</SelectItem>
                 <SelectItem value="REPLICATE">Custom Replicate model (will bill your own account)</SelectItem>
                 <SelectItem value="OPENAI">DALL·E 3 by OpenAI (partial support, will bill your own account)</SelectItem>

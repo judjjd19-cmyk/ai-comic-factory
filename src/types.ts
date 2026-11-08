@@ -107,6 +107,7 @@ export type LLMEngine =
 
 export type RenderingEngine =
   | "VIDEOCHAIN"
+  | "COMFYUI"
   | "OPENAI"
   | "REPLICATE"
   | "INFERENCE_API"

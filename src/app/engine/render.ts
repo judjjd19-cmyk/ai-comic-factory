@@ -6,6 +6,7 @@ import Replicate from "replicate"
 import { RenderRequest, RenderedScene, RenderingEngine, Settings } from "@/types"
 import { generateSeed } from "@/lib/generateSeed"
 import { sleep } from "@/lib/sleep"
+import { submitComfyUI, pollComfyUI } from "./comfyui"
 
 const serverRenderingEngine = `${process.env.RENDERING_ENGINE || ""}` as RenderingEngine
 
@@ -126,7 +127,9 @@ export async function newRender({
   } 
 
   try {
-    if (renderingEngine === "OPENAI") {
+    if (renderingEngine === "COMFYUI") {
+      return await submitComfyUI(prompt, width, height)
+    } else if (renderingEngine === "OPENAI") {
 
       /*
       const openai = new OpenAI({
@@ -487,7 +490,9 @@ export async function getRender(renderId: string, settings: Settings) {
   }
 
   try {
-    if (renderingEngine === "REPLICATE") {
+    if (renderingEngine === "COMFYUI") {
+      return await pollComfyUI(renderId)
+    } else if (renderingEngine === "REPLICATE") {
       if (!replicateApiKey) {
         throw new Error(`invalid replicateApiKey, you need to configure your AUTH_REPLICATE_API_TOKEN in order to use the REPLICATE rendering engine`)
       }
