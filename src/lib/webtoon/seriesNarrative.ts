@@ -15,18 +15,22 @@ export function seriesNarrativeContext(series:SeriesLedger|undefined):string{
   const relationships=series.relationships.map(r=>({
     characterIds:r.characterIds,note:r.note,updatedEpisode:r.updatedEpisode
   }))
-  let serialized=JSON.stringify({previousEpisodes:recent,unresolvedThreads:unresolved,
-    characterRelationships:relationships})
-  if(serialized.length<=12000)return serialized
-  // Preserve all open thread IDs and emit complete JSON, never silently cut a JSON object.
-  serialized=JSON.stringify({
-    previousEpisodes:recent.map(e=>({...e,summary:e.summary.slice(0,800),
-      endingHook:e.endingHook.slice(0,200),lastDialogue:e.lastDialogue.slice(0,200)})),
-    unresolvedThreads:unresolved.map(t=>({...t,description:t.description.slice(0,120)})),
-    characterRelationships:relationships.map(r=>({...r,note:r.note.slice(0,120)})),
+  // Open thread identities must precede optional history; never cut structured JSON in half.
+  const serialize=(limit:number,lastOnly=false):string=>JSON.stringify({
+    unresolvedThreads:unresolved.map(t=>({...t,description:t.description.slice(0,limit)})),
+    characterRelationships:relationships.map(r=>({...r,note:r.note.slice(0,limit)})),
+    previousEpisodes:(lastOnly?recent.slice(-1):recent).map(e=>({
+      episodeId:e.episodeId,
+      endingHook:e.endingHook.slice(0,Math.max(100,limit)),
+      summary:e.summary.slice(0,limit*3),
+      lastDialogue:e.lastDialogue.slice(0,limit)
+    }))
   })
-  if(serialized.length>18000)
-    throw Error('Canonical series context exceeds token budget; consolidate thread descriptions')
+  let serialized=serialize(350)
+  if(serialized.length>7300)serialized=serialize(100)
+  if(serialized.length>7300)serialized=serialize(40,true)
+  if(serialized.length>7300)
+    throw Error('Too many unresolved threads for the story context; consolidate their summaries')
   return serialized
 }
 export function draftEpisodeSummary(pairs:PairPlan[]):string{
