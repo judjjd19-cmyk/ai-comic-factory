@@ -28,7 +28,7 @@ export function buildAutoIPAdapter(workflow:ComfyWorkflow,refs:UploadedReference
       throw Error('Region reference does not belong to visible actor: '+ref.assetId)
     if(!/^[\w .()\/-]+\.(png|jpg|jpeg|webp)$/i.test(ref.image)||ref.image.includes('..'))
       throw Error('Unsafe uploaded reference filename')
-    clone[base+'_image']={class_type:'LoadImage',inputs:{image:ref.image,upload:'image'}}
+    clone[base+'_image']={class_type:'LoadImage',inputs:{image:ref.image}}
     const weight={identity:0.75,view:0.35,outfit:0.45,location:0.22,continuity:0.28}[ref.purpose]
     const inputs:Record<string,unknown>={model,ipadapter:[prefix+'model',0],image:[base+'_image',0],
       clip_vision:[prefix+'vision',0],weight,weight_type:'linear',combine_embeds:'concat',
