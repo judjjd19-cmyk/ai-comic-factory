@@ -7,6 +7,9 @@ import { mkdir, readFile, writeFile, rename, rm, stat, readdir, realpath } from 
 import { resolve, join, sep } from 'node:path'
 import { createHash, randomUUID } from 'node:crypto'
 import type {CastProposals} from './castPlanner.ts'
+import {emptySeries,beginEpisode,registerPair,prepareEpisodeHandoff,completeEpisode,
+  type SeriesLedger,type EpisodeCompletion,type EpisodeHandoff} from './seriesLoop.ts'
+import type {EpisodeOutline} from './storyOutline.ts'
 import {
   validatePairPlan,
   transitionPairJob,
@@ -30,6 +33,7 @@ export interface ProjectSnapshot {
   bubbleOverrides?: Record<string, Record<string, {text:string;box:[number,number,number,number]}>>
   rejections?: Array<{panelId:string;assetId:string;reason:string;at:string}>
   draftCasting?: CastProposals
+  series?: SeriesLedger
 }
 
 type NonApprovalEvent = Exclude<PairJobEvent, 'approve_first' | 'approve_second' | 'validate'>
@@ -140,7 +144,7 @@ export class ProjectStore {
       }
       for (const l of catalog.locations) assertId(l.id)
       for (const a of catalog.assets) assertId(a.id)
-      const snapshot: ProjectSnapshot = { schemaVersion: 1, revision: 0, projectId, catalog: structuredClone(catalog), pairs: [], approvedPanels: [] }
+      const snapshot: ProjectSnapshot = { schemaVersion: 1, revision: 0, projectId, catalog: structuredClone(catalog), pairs: [], approvedPanels: [], series: emptySeries() }
       await this.writeAtomic(projectId, snapshot)
       return snapshot
     })
@@ -151,6 +155,12 @@ export class ProjectStore {
   async appendPair(projectId: string, expectedRevision: number, plan: PairPlan): Promise<ProjectSnapshot> {
     return this.modify(projectId, expectedRevision, snapshot => {
       if (snapshot.pairs.some(item => item.plan.id === plan.id)) throw new Error('Duplicate pair ID')
+      const existingPanelIds=new Set(snapshot.pairs.flatMap(p=>p.plan.panels.map(panel=>panel.id)))
+      if(plan.panels.some(panel=>existingPanelIds.has(panel.id)))
+        throw Error('Panel ID collides with an earlier episode or pair')
+      if(snapshot.series?.episodes.length&&
+        (plan.panels[0].id!==plan.id+'_0'||plan.panels[1].id!==plan.id+'_1'))
+        throw Error('Series panel IDs must be deterministically scoped to their pair')
       const previous = snapshot.pairs.at(-1)
       if (previous) {
         if (previous.job.status !== 'approved') throw new Error('Previous pair is not approved')
@@ -159,6 +169,9 @@ export class ProjectStore {
       }
       const issues = validatePairPlan(plan, snapshot.catalog)
       if (issues.length) throw new Error('Invalid pair plan: ' + issues.map(i => i.code + ':' + i.path).join(', '))
+      // New series mode requires a registered episode. Old projects created before
+      // the series ledger existed retain their legacy pair recording behavior.
+      if(snapshot.series?.episodes.length)registerPair(snapshot.series,plan)
       const job = transitionPairJob({ id: plan.id, status: 'planned', revision: 0 }, 'validate')
       snapshot.pairs.push({plan: structuredClone(plan), job})
     })
@@ -223,6 +236,118 @@ export class ProjectStore {
     })
   }
 
+
+  /** Add an episode only after the preceding episode has been explicitly finalized. */
+  async beginEpisode(projectId:string,revision:number,input:{
+    episodeId:string;targetPairs:number;startState:import('./contracts.ts').SceneState;
+    outline?:EpisodeOutline
+  }):Promise<ProjectSnapshot>{
+    return this.modify(projectId,revision,snapshot=>{
+      snapshot.series ||= emptySeries()
+      const existing=snapshot.series.episodes.find(x=>x.id===input.episodeId)
+      if(existing){
+        if(existing.status!=='producing'||existing.targetPairs!==input.targetPairs||
+           JSON.stringify(existing.startState)!==JSON.stringify(input.startState))
+          throw Error('Existing episode does not match the requested opening')
+        return
+      }
+      if(snapshot.pairs.length && !snapshot.series.episodes.length)
+        throw Error('Legacy panels must be migrated before starting a new series episode')
+      beginEpisode(snapshot.series,{id:input.episodeId,targetPairs:input.targetPairs,
+        startState:input.startState,...(input.outline?{outline:input.outline}:{})})
+    })
+  }
+
+  /** A change to earlier dialogue must be checked against planned downstream scenes. */
+  async acknowledgeEpisodeContinuity(projectId:string,revision:number,episodeId:string,
+    reviewer:string):Promise<ProjectSnapshot>{
+    if(!reviewer.trim())throw Error('Reviewer name is required')
+    return this.modify(projectId,revision,snapshot=>{
+      const episode=snapshot.series?.episodes.find(e=>e.id===episodeId&&e.status==='producing')
+      if(!episode)throw Error('Active episode not found')
+      episode.continuityReviewRequired=false
+      episode.continuityReviewedAt=new Date().toISOString()
+    })
+  }
+
+  /** Completion is atomic: only all-approved, ordered panels may become an episode. */
+  async finalizeEpisode(projectId:string,revision:number,episodeId:string,
+    input:EpisodeCompletion):Promise<ProjectSnapshot>{
+    return this.modify(projectId,revision,async snapshot=>{
+      if(!snapshot.series)throw Error('No episode ledger')
+      const handoff=prepareEpisodeHandoff(snapshot.series,episodeId,snapshot.pairs,
+        new Set(snapshot.approvedPanels.map(p=>p.id)),input,
+        new Set(snapshot.catalog.characters.map(c=>c.id)),snapshot.bubbleOverrides||{})
+      // Completion must not refer to missing or altered approved artworks.
+      const episode=snapshot.series.episodes.find(e=>e.id===episodeId)!
+      for(const pairId of episode.pairIds){
+        const pair=snapshot.pairs.find(p=>p.plan.id===pairId)!
+        for(const assetId of [pair.job.firstApprovedAssetId,pair.job.secondApprovedAssetId]){
+          const asset=snapshot.catalog.assets.find(a=>a.id===assetId)
+          if(!asset||asset.status!=='approved')
+            throw Error('Episode has a missing approved asset')
+          await this.verifiedAsset(projectId,asset)
+        }
+      }
+      completeEpisode(snapshot.series,episodeId,handoff,input)
+    })
+  }
+
+  /** A one-time, explicit upgrade for projects created before per-episode records. */
+  async migrateLegacySeries(projectId:string,revision:number):Promise<ProjectSnapshot>{
+    return this.modify(projectId,revision,async snapshot=>{
+      snapshot.series ||= emptySeries()
+      if(snapshot.series.episodes.length)throw Error('Project is already in series mode')
+      if(!snapshot.pairs.length)return
+      const groups:Array<typeof snapshot.pairs>=[]
+      for(const item of snapshot.pairs){
+        let last=groups.at(-1)
+        if(!last||last[0].plan.episodeId!==item.plan.episodeId){
+          last=[];groups.push(last)
+        }
+        last.push(item)
+      }
+      const importedEpisodeIds=new Set<string>()
+      const registeredPanels=new Set(snapshot.approvedPanels.map(x=>x.id))
+      let priorState:import('./contracts.ts').SceneState|undefined
+      for(const group of groups){
+        if(!group.every(x=>x.job.status==='approved'))
+          throw Error('All legacy panels must be approved before series migration')
+        const episodeId=group[0].plan.episodeId
+        if(importedEpisodeIds.has(episodeId))
+          throw Error('Non-contiguous legacy episode '+episodeId+' requires manual reconciliation')
+        importedEpisodeIds.add(episodeId)
+        if(priorState&&JSON.stringify(priorState)!==JSON.stringify(group[0].plan.before))
+          throw Error('Legacy episodes contain a broken scene transition')
+        for(const item of group){
+          if(item.plan.episodeId!==episodeId||!item.plan.panels.every(panel=>registeredPanels.has(panel.id)))
+            throw Error('Legacy episode is missing an approved panel')
+          for(const refId of [item.job.firstApprovedAssetId,item.job.secondApprovedAssetId]){
+            const asset=snapshot.catalog.assets.find(a=>a.id===refId)
+            if(!asset||asset.status!=='approved')
+              throw Error('Legacy episode has an unapproved image asset')
+            await this.verifiedAsset(projectId,asset)
+          }
+        }
+        priorState=group.at(-1)!.plan.after
+        const first=group[0].plan,last=group.at(-1)!.plan
+        const ending=last.panels[1]
+        const lastDialogue=ending.bubbles.map(b=>b.text).join(' / ').slice(0,1200)
+        const handoff:EpisodeHandoff={
+          summary:group.flatMap(p=>p.plan.panels.map(q=>q.summary)).join(' / ').slice(0,6000),
+          endingHook:ending.summary.slice(0,1200),
+          lastDialogue,
+          finalState:structuredClone(last.after),
+          unresolvedThreadIds:[],completedAt:new Date().toISOString()
+        }
+        snapshot.series.episodes.push({
+          id:first.episodeId,ordinal:snapshot.series.episodes.length+1,status:'completed',
+          targetPairs:group.length,pairIds:group.map(x=>x.plan.id),startState:structuredClone(first.before),
+          createdAt:new Date().toISOString(),handoff
+        })
+      }
+    })
+  }
   async listProjects(){
     await mkdir(this.root,{recursive:true})
     const result:Array<{projectId:string;revision:number;characters:number;pairs:number}>=[]
@@ -336,8 +461,19 @@ export class ProjectStore {
       box[0]<0||box[1]<0||box[2]<=0||box[3]<=0||box[0]+box[2]>1||box[1]+box[3]>1)
       throw new Error('Bubble bounds invalid')
     return this.modify(projectId,rev,snapshot=>{
-      const panel=snapshot.pairs.flatMap(p=>p.plan.panels).find(p=>p.id===panelId)
+      const parent=snapshot.pairs.find(p=>p.plan.panels.some(panel=>panel.id===panelId))
+      const completed=snapshot.series?.episodes.find(e=>e.id===parent?.plan.episodeId&&e.status==='completed')
+      if(completed)throw new Error('Finalized episode dialogue is immutable')
+      const panel=parent?.plan.panels.find(p=>p.id===panelId)
       if(!panel||!panel.bubbles.some(b=>b.id===bubbleId))throw new Error('Unknown bubble')
+      const original=panel.bubbles.find(b=>b.id===bubbleId)!
+      const existingText=snapshot.bubbleOverrides?.[panelId]?.[bubbleId]?.text??original.text
+      const episode=snapshot.series?.episodes.find(e=>e.id===parent?.plan.episodeId)
+      if(episode&&text!==existingText){
+        const pairPosition=episode.pairIds.indexOf(parent!.plan.id)
+        if(pairPosition>=0&&pairPosition<episode.pairIds.length-1)
+          episode.continuityReviewRequired=true
+      }
       snapshot.bubbleOverrides ||= {}
       snapshot.bubbleOverrides[panelId] ||= {}
       snapshot.bubbleOverrides[panelId][bubbleId]={text,box}

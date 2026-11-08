@@ -54,3 +54,12 @@ test('exhausting retries raises validation error rather than creating degraded p
  await assert.rejects(generatePairPlan(input,async()=>{calls++;return '{}'},2),PairPlanValidationError)
  assert.equal(calls,2)
 })
+test('series panels must have pair-scoped identities and invalid model IDs are retried',async()=>{
+ const {input,output}=fixture()
+ input.episodeId='episode1';input.pairId='episode1_p00001'
+ assert.throws(()=>decodePairPlan(JSON.stringify(output),input),/Panel IDs must equal/)
+ output.panels[0].id=input.pairId+'_0'
+ output.panels[1].id=input.pairId+'_1'
+ const result=decodePairPlan(JSON.stringify(output),input)
+ assert.deepEqual(result.panels.map(p=>p.id),['episode1_p00001_0','episode1_p00001_1'])
+})

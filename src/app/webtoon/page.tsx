@@ -4,6 +4,8 @@ import {useCallback,useEffect,useRef,useState} from 'react'
 import type {ProjectSnapshot} from '@/lib/webtoon/projectStore'
 import type {BubblePlan} from '@/lib/webtoon/contracts'
 import type {CastProposals} from '@/lib/webtoon/castPlanner'
+import {episodeCompletionReady,draftEpisodeSummary} from '@/lib/webtoon/seriesNarrative'
+import {nextEpisodeId} from '@/lib/webtoon/seriesLoop'
 
 type ProjectListItem={projectId:string;revision:number;characters:number;pairs:number}
 type ApiReply={ok:boolean;data?:any;error?:string}
@@ -78,6 +80,12 @@ export default function WebtoonStudio(){
   const [storyGoal,setStoryGoal]=useState('두 주인공이 오래된 비밀을 발견하는 미스터리 웹툰')
   const [episodeId,setEpisodeId]=useState('episode1')
   const [episodePairs,setEpisodePairs]=useState(10)
+  const [autoContinue,setAutoContinue]=useState(false)
+  const [finalSynopsis,setFinalSynopsis]=useState('')
+  const [finalHook,setFinalHook]=useState('')
+  const [openThreadsText,setOpenThreadsText]=useState('')
+  const [resolveThreadsText,setResolveThreadsText]=useState('')
+  const [relationshipNotesText,setRelationshipNotesText]=useState('')
   const [remainingDrafts,setRemainingDrafts]=useState<number|null>(null)
   const [episodeOutline,setEpisodeOutline]=useState<any>(null)
   const [storyBible,setStoryBible]=useState('')
@@ -89,6 +97,7 @@ export default function WebtoonStudio(){
   const stripRef=useRef<HTMLDivElement>(null)
   const renderPollingRef=useRef(false)
   const masterPollingRef=useRef(false)
+  const autoActionRef=useRef('')
   const [pollFailed,setPollFailed]=useState(false)
   const cancelPlanningRef=useRef(false)
 
@@ -134,7 +143,13 @@ export default function WebtoonStudio(){
     finally{setBusy(false)}
   }
   const selectedMasterDraft=snapshot?.catalog.assets.find(a=>a.id===draftId)
-  const lastPair=snapshot?.pairs.at(-1)
+  const activeEpisode=snapshot?.series?.episodes.find(e=>e.status==='producing')
+  const selectedEpisode=snapshot?.series?.episodes.find(e=>e.id===episodeId)
+  const episodePairsInProject=snapshot?.pairs.filter(p=>p.plan.episodeId===episodeId)||[]
+  const currentPair=snapshot?.pairs.at(-1)
+  const lastPair=currentPair?.plan.episodeId===episodeId?currentPair:undefined
+  const episodeReady=snapshot&&selectedEpisode?episodeCompletionReady(selectedEpisode,
+    snapshot.pairs,new Set(snapshot.approvedPanels.map(p=>p.id))):null
   useEffect(()=>{
     if(!snapshot?.story)return
     const key=snapshot.projectId+':'+snapshot.story.version
@@ -174,7 +189,7 @@ export default function WebtoonStudio(){
   }
   const planPair=async()=>{
     if(!snapshot)return
-    await run('planPair',{storyGoal,episodeId,storyBibleSummary:storyBible,
+    await run('planPair',{storyGoal,episodeId,storyBibleSummary:storyBible,pairCount:episodePairs,
       locationId:snapshot.catalog.locations[0]?.id})
   }
   const planEpisode=async()=>{
@@ -204,6 +219,66 @@ export default function WebtoonStudio(){
       setRemainingDrafts(data.remaining)
     })
   }
+  const finalizeCurrentEpisode=async()=>{
+    if(!snapshot||!selectedEpisode||!episodeReady?.ready)return
+    try{
+    const openThreads=openThreadsText.split('\n').map(line=>line.trim()).filter(Boolean).map(line=>{
+      const divider=line.indexOf('|')
+      if(divider<1)throw new Error('복선 형식: thread_id | 설명')
+      return{id:line.slice(0,divider).trim(),description:line.slice(divider+1).trim()}
+    })
+    const resolveThreadIds=resolveThreadsText.split(/[,\n]/).map(x=>x.trim()).filter(Boolean)
+    const relationshipUpdates=relationshipNotesText.split('\n').map(x=>x.trim()).filter(Boolean).map(line=>{
+      const sep=line.indexOf('|')
+      const characters=line.slice(0,sep).split(',').map(x=>x.trim())
+      if(sep<0||characters.length!==2)throw new Error('관계 형식: 인물ID1,인물ID2 | 변화')
+      return{characterIds:characters as [string,string],note:line.slice(sep+1).trim()}
+    })
+    await run('finalizeEpisode',{episodeId,summary:finalSynopsis||draftEpisodeSummary(episodePairsInProject.map(p=>p.plan)),
+      endingHook:finalHook||selectedEpisode.outline?.beats.at(-1)?.event||
+        episodePairsInProject.at(-1)?.plan.panels[1].summary||'회차 종료',
+      openThreads,resolveThreadIds,relationshipUpdates},data=>{
+      const next=nextEpisodeId(data.series)
+      setEpisodeId(next)
+      setRemainingDrafts(null);setEpisodeOutline(null);setFinalSynopsis('');setFinalHook('')
+      setOpenThreadsText('');setResolveThreadsText('');setRelationshipNotesText('')
+      setMessage('회차 확정. 다음 화 '+next+'를 시작할 수 있어.')
+    })
+    }catch(error){setMessage(error instanceof Error?error.message:String(error))}
+  }
+  useEffect(()=>{
+    if(!authorized||!projectId||!episodeId)return
+    let disposed=false
+    void request('draftStatus',{projectId,episodeId}).then(data=>{
+      if(disposed)return
+      setRemainingDrafts(data?data.plans.length-data.cursor:null)
+      setEpisodeOutline(data?.outline||null)
+    }).catch(()=>{if(!disposed)setRemainingDrafts(null)})
+    return()=>{disposed=true}
+  },[authorized,projectId,episodeId])
+  useEffect(()=>{
+    if(!authorized||!autoContinue||busy||!snapshot||!activeEpisode||!lastPair||
+      activeEpisode.id!==episodeId)return
+    const status=lastPair.job.status
+    let action:string|undefined,parameters:Record<string,unknown>={}
+    if(status==='validated'){
+      action='startPanel';parameters={pairId:lastPair.plan.id,panelIndex:0}
+    }else if(status==='first_approved'){
+      action='startPanel';parameters={pairId:lastPair.plan.id,panelIndex:1}
+    }else if(status==='approved'&&
+      activeEpisode.pairIds.length<activeEpisode.targetPairs&&remainingDrafts!==null&&remainingDrafts>0){
+      action='activateDraft';parameters={episodeId}
+    }
+    if(!action)return
+    const key=projectId+'|'+snapshot.revision+'|'+lastPair.plan.id+'|'+status+'|'+action
+    if(autoActionRef.current===key)return
+    autoActionRef.current=key
+    void run(action,parameters,data=>{
+      if(data?.snapshot)setSnapshot(data.snapshot)
+      if(typeof data?.remaining==='number')setRemainingDrafts(data.remaining)
+    })
+  },[authorized,autoContinue,busy,projectId,episodeId,snapshot?.revision,
+    lastPair?.plan.id,lastPair?.job.status,remainingDrafts])
   const startRender=async(pairId:string,index:0|1)=>{
     setPollFailed(false)
     await run('startPanel',{pairId,panelIndex:index})
@@ -269,17 +344,79 @@ export default function WebtoonStudio(){
     if(!reviewCheck)return
     await run('approvePanel',{pairId,panelIndex:index,assetId},()=>setReviewCheck(false))
   }
+  const exportEpisodeManifest=()=>{
+    if(!snapshot)return
+    const episode=snapshot.series?.episodes.find(e=>e.id===episodeId)
+    if(!episode){setMessage('선택한 화가 존재하지 않아.');return}
+    const pairs=snapshot.pairs.filter(pair=>pair.plan.episodeId===episode.id)
+    const approved=new Set(snapshot.approvedPanels.map(p=>p.id))
+    const result={
+      schemaVersion:1,projectId:snapshot.projectId,episode,story:snapshot.story,
+      pairs:pairs.map(pair=>({plan:pair.plan,job:pair.job,
+        panels:pair.plan.panels.map((panel,index)=>({
+          panelId:panel.id,approved:approved.has(panel.id),
+          imageAssetId:index===0?pair.job.firstApprovedAssetId:pair.job.secondApprovedAssetId,
+          dialogue:panel.bubbles.map(b=>({
+            id:b.id,type:b.type,speakerId:b.speakerId,readOrder:b.readOrder,
+            text:snapshot.bubbleOverrides?.[panel.id]?.[b.id]?.text??b.text,
+            box:snapshot.bubbleOverrides?.[panel.id]?.[b.id]?.box??b.box,
+            tailTarget:b.tailTarget
+          }))
+        }))})),
+      unresolvedThreads:snapshot.series?.threads.filter(x=>x.status==='open')||[],
+      relationships:snapshot.series?.relationships||[]
+    }
+    const blob=new Blob([JSON.stringify(result,null,2)],{type:'application/json'})
+    const link=document.createElement('a')
+    const url=URL.createObjectURL(blob)
+    link.href=url;link.download=projectId+'-'+episodeId+'-manifest.json';link.click()
+    URL.revokeObjectURL(url)
+    setMessage(episodeId+' 원고·말풍선·서사 상태 JSON을 저장함')
+  }
   const exportImage=async()=>{
-    if(!stripRef.current)return
+    const root=stripRef.current
+    if(!root||!snapshot)return
+    const elements=Array.from(root.children).filter((x):x is HTMLElement=>x instanceof HTMLElement)
+    if(!elements.length){setMessage('선택한 화에 승인된 컷이 없어.');return}
     setBusy(true)
     try{
       const html2canvas=(await import('html2canvas')).default
-      const canvas=await html2canvas(stripRef.current,{backgroundColor:'#fff',useCORS:true,scale:2})
-      const blob=await new Promise<Blob>((resolve,reject)=>canvas.toBlob(b=>b?resolve(b):reject(Error('Export failed')),'image/png'))
-      const url=URL.createObjectURL(blob)
-      const a=document.createElement('a');a.href=url;a.download=projectId+'-webtoon.png';a.click()
-      URL.revokeObjectURL(url);setMessage('웹툰 PNG 저장 완료')
-    }catch(e){setMessage('내보내기 오류: '+String(e))}
+      const perPart=10
+      const parts=Math.ceil(elements.length/perPart)
+      for(let part=0;part<parts;part++){
+        const selection=elements.slice(part*perPart,(part+1)*perPart)
+        const panels=[]
+        for(const element of selection){
+          const canvas=await html2canvas(element,{backgroundColor:'#ffffff',useCORS:true,scale:1})
+          panels.push(canvas)
+        }
+        const width=Math.max(...panels.map(c=>c.width))
+        const gap=24
+        const height=panels.reduce((sum,c)=>sum+Math.round(c.height*width/c.width),0)+gap*(panels.length-1)
+        if(height>30000||width>8192)throw Error('웹툰 이미지 크기가 브라우저 최대치를 초과함')
+        const result=document.createElement('canvas')
+        result.width=width;result.height=height
+        const ctx=result.getContext('2d')
+        if(!ctx)throw Error('Canvas context unavailable')
+        ctx.fillStyle='#ffffff';ctx.fillRect(0,0,width,height)
+        let y=0
+        for(const canvas of panels){
+          const scaledHeight=Math.round(canvas.height*width/canvas.width)
+          ctx.drawImage(canvas,0,y,width,scaledHeight)
+          y+=scaledHeight+gap
+        }
+        const blob=await new Promise<Blob>((resolve,reject)=>
+          result.toBlob(value=>value?resolve(value):reject(Error('PNG serialization failed')),'image/png'))
+        const url=URL.createObjectURL(blob)
+        const link=document.createElement('a')
+        link.href=url
+        link.download=projectId+'-'+episodeId+'-part'+String(part+1).padStart(2,'0')+'.png'
+        link.click()
+        await new Promise(resolve=>setTimeout(resolve,120))
+        URL.revokeObjectURL(url)
+      }
+      setMessage(episodeId+' 세로 웹툰 '+elements.length+'컷을 '+parts+'개 PNG로 저장함')
+    }catch(e){setMessage('화별 내보내기 오류: '+String(e))}
     finally{setBusy(false)}
   }
 
@@ -319,12 +456,12 @@ export default function WebtoonStudio(){
       </div>
       <div className="relative w-full aspect-[3/4] bg-stone-200">
         {asset&&<img src={assetUrl(projectId,asset.id)} alt={panel.summary} className="absolute inset-0 w-full h-full object-cover"/>}
-        {asset&&panel.bubbles.slice().sort((a,b)=>a.readOrder-b.readOrder).map(b=>bubbleOverlay(panel.id,b))}
+        {asset&&panel.bubbles.slice().sort((a,b)=>a.readOrder-b.readOrder).map(b=>bubbleOverlay(panel.id,b,selectedEpisode?.status!=='completed'))}
         {!asset&&<div className="absolute inset-0 grid place-items-center text-sm text-stone-500">{panel.summary}</div>}
       </div>
       <div className="px-3 py-3 text-xs text-stone-700 space-y-2">
         <p>{panel.summary}</p>
-        {panel.bubbles.map(b=>{
+        {selectedEpisode?.status!=='completed'&&panel.bubbles.map(b=>{
           const override=snapshot?.bubbleOverrides?.[panel.id]?.[b.id]
           return <BubblePositionEditor key={b.id} bubble={b}
             initialBox={override?.box||b.box}
@@ -382,6 +519,89 @@ export default function WebtoonStudio(){
           <p className="text-xs text-stone-500">스토리 정보는 승인된 이미지에 덮어쓰지 않고 별도로 저장돼.</p>
         </div>}
         {snapshot&&<p className="text-sm text-stone-500">리비전 {snapshot.revision} · 캐릭터 {snapshot.catalog.characters.length}명 · 장소 {snapshot.catalog.locations.length}개</p>}
+      </section>
+      {snapshot&&<section className="rounded-xl bg-white p-4 space-y-3">
+        <h2 className="font-bold text-xl">연재 화수 · 진행 상태 · 다음 화 연결</h2>
+        <p className="text-sm text-stone-600">완료된 화는 잠그고, 마지막 승인 상태와 미회수 복선을 다음 화에 자동으로 전달해.</p>
+        {snapshot.series?.episodes.length?(
+          <div className="flex flex-wrap gap-2">
+            {snapshot.series.episodes.map(ep=><button key={ep.id}
+              onClick={()=>{setEpisodeId(ep.id);setRemainingDrafts(null);setEpisodeOutline(ep.outline||null)}}
+              className={'px-3 py-2 rounded border text-sm '+(episodeId===ep.id?'bg-stone-900 text-white':'bg-white')}>
+              {ep.ordinal}화 · {ep.status==='completed'?'완료':'제작 중'} · {ep.pairIds.length}/{ep.targetPairs}쌍
+            </button>)}
+            <button className="px-3 py-2 rounded border text-sm"
+              onClick={()=>{setEpisodeId(nextEpisodeId(snapshot.series!));setRemainingDrafts(null);setEpisodeOutline(null)}}>
+              다음 화 ID 준비
+            </button>
+          </div>
+        ):<div className="text-sm text-stone-600">
+          {snapshot.pairs.length?<>이전 버전의 컷들이 있어. 모든 컷이 승인됐다면
+            <button className="underline mx-1" onClick={()=>void run('migrateLegacyEpisodes')}>
+              기존 작품의 회차 데이터 변환
+            </button>을 먼저 실행해.</>:'아직 시작된 화가 없어. 아래에서 첫 화를 설계해.'}
+        </div>}
+        <div className="flex flex-wrap items-center gap-4 text-sm">
+          <strong>현재 선택: {episodeId}</strong>
+          <label className="flex items-center gap-2"><input type="checkbox" checked={autoContinue}
+            onChange={e=>setAutoContinue(e.target.checked)}/>
+            2컷 승인 시 다음 단계 자동 진행 (검수·승인은 수동)
+          </label>
+        </div>
+        {activeEpisode&&activeEpisode.id!==episodeId&&
+          <p className="text-sm text-amber-700">현재 {activeEpisode.id} 제작 중. 완료 확정 후 다음 화 제작 가능.</p>}
+        {selectedEpisode&&<div className="border rounded p-3 space-y-2">
+          <p className="text-sm">화수 {selectedEpisode.ordinal} ·
+            {selectedEpisode.status==='completed'?' 확정 완료':' 진행 중'} ·
+            {selectedEpisode.pairIds.length*2}/{selectedEpisode.targetPairs*2}컷 계획 등록
+          </p>
+          {selectedEpisode.handoff&&<div className="text-sm space-y-1">
+            <p><strong>이번 화 요약:</strong> {selectedEpisode.handoff.summary}</p>
+            <p><strong>마지막 후킹:</strong> {selectedEpisode.handoff.endingHook}</p>
+            <p><strong>다음 화 시작 상태:</strong> {selectedEpisode.handoff.finalState.locationId} ·
+              {selectedEpisode.handoff.finalState.timeKey}</p>
+          </div>}
+          {selectedEpisode.continuityReviewRequired&&<div className="rounded border border-amber-600 p-3 space-y-2">
+            <p className="text-sm text-amber-800">이전 컷의 대사가 수정되어 이후 2컷들과 서사 충돌이 없는지 검토해야 해.
+              검토를 완료하기 전에는 해당 화를 마감할 수 없어.</p>
+            <button className="border rounded px-3 py-2 text-sm" disabled={busy}
+              onClick={()=>void run('acknowledgeContinuity',{episodeId,reviewer:'local-reviewer'})}>
+              이후 컷·대사 연결 검수 완료
+            </button>
+          </div>}
+          {selectedEpisode.status==='producing'&&<>
+            <p className="text-xs text-stone-600">확정 조건: 모든 2컷 쌍 등록 + 각 컷 승인 + 복선·후킹 인계 내용 작성.</p>
+            <p className={episodeReady?.ready?'text-green-800 text-sm':'text-amber-700 text-sm'}>
+              {episodeReady?.ready?'모든 컷 승인 완료 — 화수 마감 가능':'마감 대기: '+(episodeReady?.reason||'')}
+            </p>
+            {episodeReady?.ready&&<div className="space-y-2">
+              <textarea className="border rounded p-2 w-full" rows={3}
+                placeholder="이번 화의 사건·전개·변화 요약 (비워두면 승인된 콘티 요약 사용)"
+                value={finalSynopsis} onChange={e=>setFinalSynopsis(e.target.value)}/>
+              <input className="border rounded p-2 w-full" placeholder="마지막 후킹 / 다음 화 기대 사건"
+                value={finalHook} onChange={e=>setFinalHook(e.target.value)}/>
+              <textarea className="border rounded p-2 w-full" rows={2}
+                placeholder="이번 화에 새로 생긴 미해결 복선 — 줄마다 thread_id | 설명"
+                value={openThreadsText} onChange={e=>setOpenThreadsText(e.target.value)}/>
+              <textarea className="border rounded p-2 w-full" rows={2}
+                placeholder="이번 화에서 회수된 기존 복선 ID (쉼표 또는 줄바꿈으로 구분)"
+                value={resolveThreadsText} onChange={e=>setResolveThreadsText(e.target.value)}/>
+              <textarea className="border rounded p-2 w-full" rows={2}
+                placeholder="관계 변화 — 줄마다 캐릭터ID1,캐릭터ID2 | 변화 내용"
+                value={relationshipNotesText} onChange={e=>setRelationshipNotesText(e.target.value)}/>
+              <button className="bg-stone-900 text-white rounded px-4 py-2 disabled:opacity-40"
+                disabled={busy} onClick={()=>void finalizeCurrentEpisode()}>
+                {selectedEpisode.ordinal}화 완료 확정 → 다음 화 준비
+              </button>
+            </div>}
+          </>}
+        </div>}
+        {snapshot.series?.threads.some(t=>t.status==='open')&&<div className="text-sm space-y-1">
+          <strong>미회수 복선 목록</strong>
+          {snapshot.series.threads.filter(t=>t.status==='open').map(t=><p key={t.id}>
+            {t.id} · {t.description} (처음: {t.introducedEpisode})
+          </p>)}
+        </div>}
       </section>
       {snapshot&&<section className="rounded-xl bg-white p-4 space-y-3">
         <h2 className="font-bold text-xl">2. 스토리에서 주요 인물·장소 초안 제안</h2>
@@ -476,7 +696,7 @@ export default function WebtoonStudio(){
           <div className="flex flex-wrap items-center gap-3">
             <button className="border rounded px-3 py-2 disabled:opacity-40" disabled={busy}
               onClick={()=>void run('designEpisodeOutline',{episodeId,storyGoal,storyBibleSummary:storyBible},
-                data=>setEpisodeOutline(data.outline))}>
+                data=>{setEpisodeOutline(data.outline);if(data.outline?.recommendedPairs)setEpisodePairs(data.outline.recommendedPairs)})}>
               LLM 회차 기승전결·클리프행어 설계
             </button>
             <button className="underline text-sm" disabled={busy}
@@ -487,6 +707,7 @@ export default function WebtoonStudio(){
           {episodeOutline&&<div className="space-y-2 text-sm">
             <p><strong>주제:</strong> {episodeOutline.theme}</p>
             <p><strong>갈등·위험:</strong> {episodeOutline.stakes}</p>
+            {episodeOutline.recommendedPairs&&<p><strong>LLM 권장 길이:</strong> {episodeOutline.recommendedPairs*2}컷 · {episodeOutline.recommendedPairs}쌍 (직접 조정 가능)</p>}
             {episodeOutline.beats?.map((beat:any)=><p key={beat.stage} className="border-l-2 pl-3">
               <strong>{beat.stage}</strong> · {beat.event} ({beat.emotionalChange})
             </p>)}
@@ -494,8 +715,8 @@ export default function WebtoonStudio(){
         </div>
         <div className="flex gap-3 items-center flex-wrap">
           <label className="text-sm">회차 2컷 쌍 수
-            <input type="number" min={1} max={50} value={episodePairs}
-              onChange={e=>setEpisodePairs(Math.max(1,Math.min(50,Number(e.target.value)||1)))}
+            <input type="number" min={1} max={250} value={episodePairs}
+              onChange={e=>setEpisodePairs(Math.max(1,Math.min(250,Number(e.target.value)||1)))}
               className="ml-2 border rounded p-2 w-20"/>
           </label>
           <button className="rounded border px-4 py-2 disabled:opacity-40" disabled={busy}
@@ -565,11 +786,18 @@ export default function WebtoonStudio(){
       </section>}
       {snapshot&&snapshot.approvedPanels.length>0&&<section className="rounded-xl bg-white p-4 space-y-3">
         <div className="flex justify-between items-center flex-wrap">
-          <h2 className="font-bold text-xl">5. 승인된 세로 웹툰</h2>
-          <button disabled={busy} className="border rounded px-3 py-2" onClick={()=>void exportImage()}>전체 PNG 내보내기</button>
+          <h2 className="font-bold text-xl">{episodeId} · 승인된 세로 웹툰</h2>
+          <div className="flex gap-2 flex-wrap">
+            <button disabled={busy} className="border rounded px-3 py-2" onClick={()=>void exportImage()}>
+              선택 화 PNG 내보내기 (10컷씩)
+            </button>
+            <button className="border rounded px-3 py-2" onClick={exportEpisodeManifest}>
+              선택 화 대사·컷·서사 JSON
+            </button>
+          </div>
         </div>
         <div ref={stripRef} className="mx-auto max-w-xl bg-white space-y-5">
-          {snapshot.pairs.flatMap(pair=>pair.plan.panels.map(panel=>({pair,panel})))
+          {episodePairsInProject.flatMap(pair=>pair.plan.panels.map(panel=>({pair,panel})))
             .filter(({panel})=>snapshot.approvedPanels.some(p=>p.id===panel.id))
             .map(({panel})=>{
               const asset=assetForPanel(panel.id)

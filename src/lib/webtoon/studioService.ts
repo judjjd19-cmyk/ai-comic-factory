@@ -3,6 +3,8 @@ import 'server-only'
 import {mkdir,readFile,writeFile,rename,rm,stat} from 'node:fs/promises'
 import sharp from 'sharp'
 import {inspectLayout} from './panelQA'
+import {episodePairId, nextEpisodeId, type EpisodeCompletion} from './seriesLoop'
+import {seriesNarrativeContext} from './seriesNarrative'
 import {uploadSelectedReferences} from './comfyReference'
 import {makeActorMask,uploadActorMask} from './regionMasks'
 import type {PanelPlan,SelectedReference} from './contracts'
@@ -143,7 +145,7 @@ export async function generateCharacterReference(projectId:string,ownerId:string
   return submitComfyUI(prompt,width,height,{uploaded,auto:{panel,masks}})
 }
 export async function planWebtoonPair(projectId:string,storyGoal:string,episodeId='episode1',
-  locationId?:string,storyBibleSummary=''):Promise<ProjectSnapshot>{
+  locationId?:string,storyBibleSummary='',targetPairs=10):Promise<ProjectSnapshot>{
   if(!storyGoal.trim()||storyGoal.length>5000)throw new Error('Story goal must be provided')
   safeId(episodeId)
   const snapshot=await store.read(projectId)
@@ -154,11 +156,20 @@ export async function planWebtoonPair(projectId:string,storyGoal:string,episodeI
   const location=snapshot.catalog.locations.find(l=>l.id===(locationId||snapshot.catalog.locations[0].id))
   if(!location)throw new Error('Unknown location')
   const initial=initialScene(snapshot.catalog,location.id)
-  const pairId='pair'+String(snapshot.pairs.length+1).padStart(5,'0')
+  const active=snapshot.series?.episodes.find(e=>e.status==='producing')
+  if(active&&active.id!==episodeId)throw Error('Finalize the current episode before creating the next')
+  if(snapshot.series?.episodes.some(e=>e.id===episodeId&&e.status==='completed'))
+    throw Error('This episode is already completed')
+  if(await readEpisodeDrafts(projectId,episodeId))
+    throw Error('This episode has saved drafts: use the approved draft activation workflow')
+  const pairIndex=active?.pairIds.length||0
+  const pairId=episodePairId(episodeId,pairIndex+1)
+  if(active&&pairIndex>=active.targetPairs)throw Error('Episode already has the planned number of pairs')
   const input={
     pairId,episodeId,storyGoal,storyBibleSummary,
-    approvedHistorySummary:snapshot.pairs.slice(-8).map(p=>
-      p.plan.panels.map(x=>x.summary+' '+x.bubbles.map(b=>b.text).join(' ')).join(' / ')).join('\n'),
+    approvedHistorySummary:('CANONICAL_EPISODE_MEMORY: '+seriesNarrativeContext(snapshot.series)+'\n'+
+      snapshot.pairs.slice(-8).map(p=>
+        p.plan.panels.map(x=>x.summary+' '+x.bubbles.map(b=>b.text).join(' ')).join(' / ')).join('\n')).slice(0,10000),
     before:last?.plan.after||initial,catalog:snapshot.catalog
   }
   const plan:PairPlan=await generatePairPlan(input,({systemPrompt,userPrompt,maxNewTokens})=>predict({
@@ -166,7 +177,15 @@ export async function planWebtoonPair(projectId:string,storyGoal:string,episodeI
     llmVendorConfig:{vendor:'SERVER',apiKey:'',modelId:''}
   }))
   // Check revision again; no speculative plan may overwrite a concurrently approved pair.
-  return store.appendPair(projectId,snapshot.revision,plan)
+  let current=snapshot
+  if(!active){
+    const previous=current.series?.episodes.at(-1)
+    if(previous&&previous.status!=='completed')throw Error('Complete the preceding episode before starting another')
+    current=await store.beginEpisode(projectId,current.revision,{
+      episodeId,targetPairs,startState:last?.plan.after||initial
+    })
+  }
+  return store.appendPair(projectId,current.revision,plan)
 }
 export async function startWebtoonPanel(projectId:string,pairId:string,panelIndex:0|1,width=768,height=1024){
   if(panelIndex!==0&&panelIndex!==1)throw new Error('Invalid panel index')
@@ -324,10 +343,32 @@ export async function saveWebtoonStory(projectId:string,premise:string,bible:str
 
 export async function createWebtoonEpisodeOutline(projectId:string,episodeId:string,premise:string,bible:string){
   const snapshot=await store.read(projectId)
-  const outline=await designEpisodeOutline(episodeId,premise,bible,snapshot.catalog,
+  const carryover=seriesNarrativeContext(snapshot.series)
+  const outline=await designEpisodeOutline(episodeId,premise,
+    (bible+'\nCANONICAL_PREVIOUS_EPISODE_MEMORY: '+carryover).slice(0,15000),snapshot.catalog,
     ({systemPrompt,userPrompt,maxNewTokens})=>predict({
       systemPrompt,userPrompt,nbMaxNewTokens:maxNewTokens,
       llmVendorConfig:{vendor:'SERVER',apiKey:'',modelId:''}
     }))
   return saveEpisodeOutline(projectId,episodeId,premise,bible,outline,store)
+}
+
+/** The final episode is only committed once every planned pair has two approved images. */
+export async function finalizeWebtoonEpisode(projectId:string,episodeId:string,
+  input:EpisodeCompletion):Promise<ProjectSnapshot>{
+  const snapshot=await store.read(projectId)
+  return store.finalizeEpisode(projectId,snapshot.revision,episodeId,input)
+}
+export async function nextWebtoonEpisodeId(projectId:string){
+  const snapshot=await store.read(projectId)
+  return nextEpisodeId(snapshot.series||{episodes:[],threads:[],relationships:[]})
+}
+export async function migrateWebtoonLegacyEpisodes(projectId:string){
+  const snapshot=await store.read(projectId)
+  return store.migrateLegacySeries(projectId,snapshot.revision)
+}
+
+export async function acknowledgeWebtoonContinuity(projectId:string,episodeId:string,reviewer:string){
+  const snapshot=await store.read(projectId)
+  return store.acknowledgeEpisodeContinuity(projectId,snapshot.revision,episodeId,reviewer)
 }

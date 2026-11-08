@@ -5,6 +5,7 @@ import {
   generateMasterImage,pollMasterImage,planWebtoonPair,startWebtoonPanel,
   pollWebtoonPanel,approveWebtoonPanel,rejectWebtoonPanel,editWebtoonBubble,generateCharacterReference,
   planEntireWebtoonEpisode,nextPlannedWebtoonPair,savedWebtoonEpisodeDrafts,inspectWebtoonPanel,planOneWebtoonPairStep,suggestWebtoonCast,saveWebtoonStory,createWebtoonEpisodeOutline,
+  finalizeWebtoonEpisode,nextWebtoonEpisodeId,migrateWebtoonLegacyEpisodes,acknowledgeWebtoonContinuity,
 } from '@/lib/webtoon/studioService'
 
 export const runtime='nodejs'
@@ -66,6 +67,21 @@ export async function POST(request:Request){
         data=await saveWebtoonStory(projectId,str(body.storyGoal),str(body.storyBibleSummary));break
       case 'suggestCast':
         data=await suggestWebtoonCast(str(body.storyGoal),str(body.storyBibleSummary));break
+      case 'acknowledgeContinuity':
+        data=await acknowledgeWebtoonContinuity(projectId,str(body.episodeId),
+          str(body.reviewer)||'local-reviewer');break
+      case 'finalizeEpisode':
+        data=await finalizeWebtoonEpisode(projectId,str(body.episodeId),{
+          summary:str(body.summary),endingHook:str(body.endingHook),
+          openThreads:Array.isArray(body.openThreads)?body.openThreads as Array<{id:string;description:string}>:[],
+          resolveThreadIds:Array.isArray(body.resolveThreadIds)?body.resolveThreadIds as string[]:[],
+          relationshipUpdates:Array.isArray(body.relationshipUpdates)?body.relationshipUpdates as Array<{
+            characterIds:[string,string];note:string}>:[]
+        });break
+      case 'nextEpisodeId':
+        data=await nextWebtoonEpisodeId(projectId);break
+      case 'migrateLegacyEpisodes':
+        data=await migrateWebtoonLegacyEpisodes(projectId);break
       case 'designEpisodeOutline':
         data=await createWebtoonEpisodeOutline(projectId,str(body.episodeId)||'episode1',
           str(body.storyGoal),str(body.storyBibleSummary));break
@@ -83,7 +99,7 @@ export async function POST(request:Request){
         data=await savedWebtoonEpisodeDrafts(projectId,str(body.episodeId)||'episode1');break
       case 'planPair':
         data=await planWebtoonPair(projectId,str(body.storyGoal),str(body.episodeId)||'episode1',
-          str(body.locationId)||undefined,str(body.storyBibleSummary));break
+          str(body.locationId)||undefined,str(body.storyBibleSummary),number(body.pairCount)||10);break
       case 'startPanel':
         data=await startWebtoonPanel(projectId,str(body.pairId),index(body.panelIndex),
           number(body.width)||768,number(body.height)||1024);break
