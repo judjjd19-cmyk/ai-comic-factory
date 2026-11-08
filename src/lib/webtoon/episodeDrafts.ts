@@ -7,6 +7,7 @@ import type {PairPlan,SceneState,WebtoonCatalog} from './contracts.ts'
 
 const id=(s:string)=>{if(!/^[A-Za-z0-9][A-Za-z0-9_-]{0,79}$/.test(s))throw Error('Invalid identifier');return s}
 const hash=(value:unknown)=>createHash('sha256').update(JSON.stringify(value)).digest('hex')
+const masterHash=(catalog:WebtoonCatalog)=>hash({characters:catalog.characters,locations:catalog.locations,assets:catalog.assets.filter(a=>a.kind!=='previous-panel')})
 const root=()=>resolve(process.env.WEBTOON_DATA_DIR||join(process.cwd(),'webtoon-data'))
 const path=(projectId:string,episodeId:string)=>join(root(),id(projectId),'drafts',id(episodeId)+'.json')
 export interface EpisodeDrafts {
@@ -40,7 +41,7 @@ export async function generateEpisodeDrafts(input:{projectId:string;episodeId:st
   if(!Number.isInteger(input.pairCount)||input.pairCount<1||input.pairCount>50)throw Error('Invalid pair count')
   if(!storyGoal.trim()||storyGoal.length>5000||storyBible.length>15000)throw Error('Invalid episode story')
   const snapshot=await store.read(projectId)
-  const catalogHash=hash(snapshot.catalog)
+  const catalogHash=masterHash(snapshot.catalog)
   const file=path(projectId,episodeId)
   let draft=await readEpisodeDrafts(projectId,episodeId)
   if(draft){
@@ -68,7 +69,7 @@ export async function activateNextEpisodeDraft(projectId:string,episodeId:string
   const draft=await readEpisodeDrafts(projectId,episodeId)
   if(!draft)throw Error('No saved episode plan')
   const snapshot=await store.read(projectId)
-  if(hash(snapshot.catalog)!==draft.catalogHash)throw Error('Masters changed since episode planning')
+  if(masterHash(snapshot.catalog)!==draft.catalogHash)throw Error('Masters changed since episode planning')
   const last=snapshot.pairs.at(-1)
   if(last&&last.job.status!=='approved')throw Error('Previous pair must be approved first')
   let cursor=draft.cursor
