@@ -159,14 +159,15 @@ export class ProjectStore {
     return structuredClone(await this.readRaw(projectId))
   }
   async appendPair(projectId: string, expectedRevision: number, plan: PairPlan,
-    episodeStart?:{targetPairs:number;startState:import('./contracts.ts').SceneState}): Promise<ProjectSnapshot> {
+    episodeStart?:{targetPairs:number;startState:import('./contracts.ts').SceneState;outline?:EpisodeOutline}): Promise<ProjectSnapshot> {
     return this.modify(projectId, expectedRevision, snapshot => {
       if(episodeStart){
         snapshot.series ||= emptySeries()
         if(snapshot.pairs.length&&!snapshot.series.episodes.length)
           throw Error('Legacy pairs require migration before a new episode')
         beginEpisode(snapshot.series,{id:plan.episodeId,targetPairs:episodeStart.targetPairs,
-          startState:episodeStart.startState})
+          startState:episodeStart.startState,
+          ...(episodeStart.outline?{outline:episodeStart.outline}:{})})
       }
       if (snapshot.pairs.some(item => item.plan.id === plan.id)) throw new Error('Duplicate pair ID')
       const existingPanelIds=new Set(snapshot.pairs.flatMap(p=>p.plan.panels.map(panel=>panel.id)))

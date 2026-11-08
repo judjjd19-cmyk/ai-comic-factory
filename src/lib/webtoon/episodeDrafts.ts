@@ -255,7 +255,8 @@ export async function activateNextEpisodeDraft(projectId:string,episodeId:string
       if(previous&&JSON.stringify(previous.plan.after)!==JSON.stringify(plan.before))
         throw Error('Approved state differs from the next two-panel plan')
       const first=!episode?{
-        targetPairs:draft.targetPairs,startState:draft.plans[0].before
+        targetPairs:draft.targetPairs,startState:draft.plans[0].before,
+        ...(draft.outline?{outline:draft.outline}:{})
       }:undefined
       // Single manifest transaction: either episode+first pair are both recorded,
       // or neither exists. Never strand a newly begun empty episode.
