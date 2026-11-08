@@ -1,6 +1,6 @@
 import 'server-only'
 
-import {mkdir,readFile,writeFile,rename,stat} from 'node:fs/promises'
+import {mkdir,readFile,writeFile,rename,rm,stat} from 'node:fs/promises'
 import sharp from 'sharp'
 import {inspectLayout} from './panelQA'
 import {resolve,join} from 'node:path'
@@ -22,7 +22,7 @@ const root=()=>resolve(process.env.WEBTOON_DATA_DIR||join(process.cwd(),'webtoon
 const taskPath=(projectId:string,pairId:string,panelIndex:0|1)=>
   join(root(),safeId(projectId),'tasks',safeId(pairId)+'_'+panelIndex+'.json')
 type Task={promptId:string;pairId:string;panelIndex:0|1;createdAt:string;
-  status:'pending'|'failed';attempt:number;width:number;height:number;error?:string}
+  status:'submitting'|'pending'|'failed';attempt:number;width:number;height:number;error?:string}
 async function getTask(projectId:string,pairId:string,panelIndex:0|1):Promise<Task|null>{
   try{return JSON.parse(await readFile(taskPath(projectId,pairId,panelIndex),'utf8')) as Task}
   catch(e){if((e as NodeJS.ErrnoException).code==='ENOENT')return null;throw e}
@@ -37,6 +37,21 @@ async function saveTask(projectId:string,task:Task,replace=false):Promise<void>{
   const temp=file+'.'+randomUUID()+'.tmp'
   await writeFile(temp,JSON.stringify(task,null,2),{flag:'wx'})
   await rename(temp,file)
+}
+
+
+/** File-system lease: two requests cannot submit the same pair/panel concurrently. */
+async function withRenderTaskLock<T>(projectId:string,pairId:string,panelIndex:0|1,fn:()=>Promise<T>):Promise<T>{
+  const folder=join(root(),safeId(projectId),'tasks')
+  await mkdir(folder,{recursive:true})
+  const lock=join(folder,safeId(pairId)+'_'+panelIndex+'.lock')
+  try{await mkdir(lock)}catch(e){
+    if((e as NodeJS.ErrnoException).code==='EEXIST')
+      throw new Error('A render submission for this panel is already in progress')
+    throw e
+  }
+  try{return await fn()}
+  finally{await rm(lock,{recursive:true,force:true})}
 }
 
 export async function createWebtoonProject(projectId:string):Promise<ProjectSnapshot>{
@@ -96,26 +111,47 @@ export async function planWebtoonPair(projectId:string,storyGoal:string,episodeI
 }
 export async function startWebtoonPanel(projectId:string,pairId:string,panelIndex:0|1,width=768,height=1024){
   if(panelIndex!==0&&panelIndex!==1)throw new Error('Invalid panel index')
-  let snapshot=await store.read(projectId)
-  const record=snapshot.pairs.find(p=>p.plan.id===pairId)
-  if(!record)throw new Error('Unknown pair')
-  const expected=panelIndex===0?'rendering_first':'rendering_second'
-  const initial=panelIndex===0?'validated':'first_approved'
-  if(record.job.status===initial)
-    snapshot=await store.advancePair(projectId,snapshot.revision,pairId,panelIndex===0?'render_first':'render_second')
-  else if(record.job.status!==expected)throw new Error('Pair cannot render in state '+record.job.status)
-  const existing=await getTask(projectId,pairId,panelIndex)
-  if(existing && existing.status!=='failed')return{promptId:existing.promptId,status:'pending'}
-  if(existing && existing.attempt>=3)throw new Error('Retry budget exhausted (3 attempts)')
-  const scene=await renderQueuedPanel({projectId,pairId,panelIndex,width,height})
-  if(scene.status!=='pending'||!scene.renderId)throw new Error('ComfyUI did not queue this render')
-  await saveTask(projectId,{promptId:scene.renderId,pairId,panelIndex,createdAt:new Date().toISOString(),
-    status:'pending',attempt:(existing?.attempt||0)+1,width,height},!!existing)
-  return{promptId:scene.renderId,status:'pending'}
+  if(!Number.isInteger(width)||!Number.isInteger(height)||width<256||height<256||
+    width>2048||height>2048||width%8!==0||height%8!==0)
+    throw new Error('Image dimensions must be multiples of 8, between 256 and 2048')
+  return withRenderTaskLock(projectId,pairId,panelIndex,async()=>{
+    let snapshot=await store.read(projectId)
+    const record=snapshot.pairs.find(p=>p.plan.id===pairId)
+    if(!record)throw new Error('Unknown pair')
+    const expected=panelIndex===0?'rendering_first':'rendering_second'
+    const initial=panelIndex===0?'validated':'first_approved'
+    if(record.job.status===initial)
+      snapshot=await store.advancePair(projectId,snapshot.revision,pairId,panelIndex===0?'render_first':'render_second')
+    else if(record.job.status!==expected)throw new Error('Pair cannot render in state '+record.job.status)
+    let existing=await getTask(projectId,pairId,panelIndex)
+    if(existing?.status==='pending')return {promptId:existing.promptId,status:'pending'}
+    if(existing?.status==='submitting'){
+      const age=Date.now()-new Date(existing.createdAt).getTime()
+      if(Number.isFinite(age)&&age>=0&&age<180_000)
+        return{promptId:'',status:'submitting'}
+      existing={...existing,status:'failed',error:'Unfinished submission from previous server session'}
+      await saveTask(projectId,existing,true)
+    }
+    if(existing&&existing.attempt>=3)throw new Error('Retry budget exhausted (3 attempts)')
+    const reserved:Task={promptId:'',pairId,panelIndex,
+      createdAt:new Date().toISOString(),status:'submitting',
+      attempt:(existing?.attempt||0)+1,width,height}
+    await saveTask(projectId,reserved,!!existing)
+    try{
+      const scene=await renderQueuedPanel({projectId,pairId,panelIndex,width,height})
+      if(scene.status!=='pending'||!scene.renderId)throw new Error('ComfyUI did not queue the render')
+      await saveTask(projectId,{...reserved,promptId:scene.renderId,status:'pending'},true)
+      return{promptId:scene.renderId,status:'pending'}
+    }catch(e){
+      await saveTask(projectId,{...reserved,status:'failed',error:String(e)},true)
+      throw e
+    }
+  })
 }
 export async function pollWebtoonPanel(projectId:string,pairId:string,panelIndex:0|1){
   const task=await getTask(projectId,pairId,panelIndex)
   if(!task)throw new Error('No recorded ComfyUI job')
+  if(task.status==='submitting')return{status:'submitting'}
   if(task.status==='failed')return{status:'error',error:task.error||'Previous render failed; press restart'}
   let snapshot=await store.read(projectId)
   const record=snapshot.pairs.find(p=>p.plan.id===pairId)
