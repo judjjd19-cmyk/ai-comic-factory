@@ -1,32 +1,28 @@
-import { GeneratedPanel } from "@/types"
+import type { GeneratedPanel } from "@/types"
 import { cleanJson } from "./cleanJson"
-import { parseBadJSON } from "./parseBadJSON"
 
 export function dirtyGeneratedPanelsParser(input: string): GeneratedPanel[] {
-
-  if (input.includes("```")) {
-    input = input.split("```")[0]
+  const parsed: unknown = JSON.parse(cleanJson(input))
+  if (!Array.isArray(parsed) || parsed.length === 0) {
+    throw new Error("Expected a non-empty array of generated panels")
   }
-  // we only keep what's after the first [
-  let jsonOrNot = cleanJson(input)
-
-  const jsonData = parseBadJSON(jsonOrNot) as GeneratedPanel[]
-
-  const results = jsonData.map((item, i) => {
-    let panel = i
-    let speech = item.speech ? item.speech.trim() : ''
-    let caption = item.caption ? item.caption.trim() : ''
-    let instructions = item.instructions ? item.instructions.trim() : ''
-    if (!instructions && !caption && speech) {
-      instructions = speech
-    } else if (!instructions && caption) {
-      instructions = caption
-    } 
-    if (!caption && instructions) {
-      caption = instructions
+  return parsed.map((entry: unknown, i: number) => {
+    if (!entry || typeof entry !== "object") throw new Error("Invalid panel at index " + i)
+    const raw = entry as Record<string, unknown>
+    if (typeof raw.instructions !== "string" || !raw.instructions.trim()) {
+      throw new Error("Panel " + i + " is missing drawing instructions")
     }
-    return { panel, speech, caption, instructions }
+    if (raw.speech !== undefined && typeof raw.speech !== "string") {
+      throw new Error("Panel " + i + " has invalid speech")
+    }
+    if (raw.caption !== undefined && typeof raw.caption !== "string") {
+      throw new Error("Panel " + i + " has invalid caption")
+    }
+    return {
+      panel: i,
+      instructions: raw.instructions.trim(),
+      speech: typeof raw.speech === "string" ? raw.speech.trim() : "",
+      caption: typeof raw.caption === "string" ? raw.caption.trim() : ""
+    }
   })
-
-  return results
 }

@@ -35,11 +35,8 @@ export const predictNextPanels = async ({
     : ''
 
   const firstNextOrLast =
-    existingPanels.length === 0
-      ? "first"
-      : (maxNbPanels - existingPanels.length) === maxNbPanels
-      ? "last"
-      : "next"
+    existingPanels.length === 0 ? "first" :
+    existingPanels.length + nbPanelsToGenerate >= maxNbPanels ? "last" : "next"
 
   const systemPrompt = getSystemPrompt({
     preset,
@@ -57,7 +54,7 @@ export const predictNextPanels = async ({
 
   // we don't require a lot of token for our task,
   // but to be safe, let's count ~200 tokens per panel
-  const nbTokensPerPanel = 200
+  const nbTokensPerPanel = 420
 
   const nbMaxNewTokens = nbPanelsToGenerate * nbTokensPerPanel
 
@@ -98,28 +95,9 @@ export const predictNextPanels = async ({
   // console.log("Raw response from LLM:", result)
   const tmp = cleanJson(result)
   
-  let generatedPanels: GeneratedPanel[] = []
-
-  try {
-    generatedPanels = dirtyGeneratedPanelsParser(tmp)
-  } catch (err) {
-    // console.log(`failed to read LLM response: ${err}`)
-    // console.log(`original response was:`, result)
-
-      // in case of failure here, it might be because the LLM hallucinated a completely different response,
-      // such as markdown. There is no real solution.. but we can try a fallback:
-
-    generatedPanels = (
-      tmp.split("*")
-      .map(item => item.trim())
-      .map((cap, i) => ({
-        panel: i,
-        caption: cap,
-        speech: cap,
-        instructions: cap,
-      }))
-    )
+  const generatedPanels = dirtyGeneratedPanelsParser(tmp)
+  if (generatedPanels.length !== nbPanelsToGenerate) {
+    throw new Error("Expected " + nbPanelsToGenerate + " valid panels; got " + generatedPanels.length)
   }
-
   return generatedPanels.map(res => dirtyGeneratedPanelCleaner(res))
 }
