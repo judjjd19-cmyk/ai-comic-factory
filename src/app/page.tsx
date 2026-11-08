@@ -28,6 +28,7 @@ export default async function IndexPage() {
          // important: in "print" mode we need to allow going out of the screen
          `inset-auto print:h-auto print:w-auto print:overflow-visible print:relative print:flex-none`
         )}>
+        <a href="/webtoon" className="print:hidden fixed top-2 right-3 z-50 rounded-lg bg-stone-900 text-white px-3 py-2 text-sm shadow-lg">Webtoon Studio 열기</a>
         <TooltipProvider delayDuration={100}>
           
           <Main />

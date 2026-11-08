@@ -42,3 +42,6 @@ pnpm-lock.yaml
 # Model-specific local ComfyUI wiring
 /comfyui/reference-bindings.json
 /comfyui/workflow-api.json
+/.webtoon-runtime/
+*.gguf
+*.safetensors

@@ -199,3 +199,17 @@ AUTH_REPLICATE_API_TOKEN="Your Replicate token"
 If you fork the project you will be able to modify the code to use the Stable Diffusion technology of your choice (local, open-source, proprietary, your custom HF Space etc).
 
 It would even be something else, such as Dall-E.
+
+
+## Webtoon Studio (development preview)
+
+The original AI Comic Factory editor is preserved at `/`.
+New webtoon production workflow: `/webtoon` (authentication requires `WEBTOON_STUDIO_TOKEN`).
+
+- **Canonical artwork:** LLM proposes main characters and stable places; human-approved reference sheets remain immutable.
+- **Story continuity:** episode arc (opening, inciting, escalation, climax, hook), then exactly two-panel screenplay batches.
+- **Image pipeline:** Illustrious XL via ComfyUI; SDXL IP-Adapter region masks, approved-previous-panel references, human review/repair, editable dialogue balloons.
+- **Colab T4:** Qwen3.5-9B GGUF Q4 and Illustrious XL run in separate GPU phases. Models are downloaded by setup scripts.
+- **Development docs:** [Studio runbook](docs/WEBTOON_STUDIO_RUNBOOK_KR.md), [implementation plan](docs/WEBTOON_PRODUCTION_PLAN_KR.md), [Colab T4 notebook](notebooks/WEBTOON_COLAB_T4.ipynb).
+
+**Status:** Core/state tests pass on a local mirrored subset, but the latest branch has not passed a full Next build or GPU image integration. GitLab CI is blocked by account identity verification. This is a development preview; do not claim automatic perfect character consistency.

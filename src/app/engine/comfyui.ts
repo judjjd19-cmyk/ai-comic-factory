@@ -1,11 +1,14 @@
 import "server-only"
-import { randomUUID } from "node:crypto"
+import { randomUUID, createHash } from "node:crypto"
 import { readFile } from "node:fs/promises"
 import { resolve } from "node:path"
 import type { RenderedScene } from "@/types"
 import { bindReferenceNodes, type UploadedReference, type ComfyBindings } from "@/lib/webtoon/comfyReference"
+import { buildAutoIPAdapter } from '@/lib/webtoon/autoAdapter'
+import { validateComfyWorkflow, type ComfyNodeInfo } from '@/lib/webtoon/comfyPreflight'
+import type { PanelPlan } from '@/lib/webtoon/contracts'
 
-type WorkflowReferences = { uploaded: UploadedReference[]; bindings: ComfyBindings }
+type WorkflowReferences = { uploaded: UploadedReference[]; bindings?: ComfyBindings; auto?: { panel: PanelPlan; masks:Record<string,string> } }
 
 // ComfyUI's exported API workflow is a dictionary keyed by node ID.
 type Inputs = Record<string, unknown>
@@ -109,7 +112,13 @@ export async function prepareComfyUIWorkflow(prompt: string, width: number, heig
     inputs.strength_clip = numeric(process.env.COMFYUI_STYLE_LORA_CLIP_STRENGTH, 0.8)
   }
   if (!nodesByType(workflow, ["SaveImage"]).length) throw new Error("Workflow must contain SaveImage")
-  if (references?.uploaded.length) workflow = bindReferenceNodes(workflow, references.uploaded, references.bindings)
+  if (references?.uploaded.length && references.auto) {
+    workflow = buildAutoIPAdapter(workflow,references.uploaded,references.auto.panel,references.auto.masks,
+      process.env.COMFYUI_IPADAPTER_FILE || 'ip-adapter-plus_sdxl_vit-h.safetensors',
+      process.env.COMFYUI_CLIP_VISION_FILE || 'CLIP-ViT-H-14-laion2B-s32B-b79K.safetensors')
+  } else if (references?.uploaded.length) {
+    workflow = bindReferenceNodes(workflow,references.uploaded,references.bindings||{})
+  }
   return workflow
 }
 
@@ -117,8 +126,23 @@ function scene(renderId: string, status: RenderedScene["status"], alt = "", asse
   return { renderId, status, assetUrl, alt, error, maskUrl: "", segments: [] }
 }
 
+let cacheInfo: {url:string;at:number;info:ComfyNodeInfo}|null=null
+async function preflightComfy(workflow:Workflow):Promise<void>{
+  const url=endpoint()
+  let info:ComfyNodeInfo
+  if(cacheInfo&&cacheInfo.url===url&&Date.now()-cacheInfo.at<60_000){
+    info=cacheInfo.info
+  }else{
+    const reply=await fetch(url+"/object_info",{cache:"no-store"})
+    if(!reply.ok)throw new Error("ComfyUI /object_info failed: HTTP "+reply.status)
+    info=await reply.json() as ComfyNodeInfo
+    cacheInfo={url,at:Date.now(),info}
+  }
+  validateComfyWorkflow(workflow,info)
+}
 export async function submitComfyUI(prompt: string, width: number, height: number, references?: WorkflowReferences): Promise<RenderedScene> {
   const workflow = await prepareComfyUIWorkflow(prompt, width, height, references)
+  await preflightComfy(workflow)
   const res = await fetch(endpoint() + "/prompt", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
@@ -128,7 +152,14 @@ export async function submitComfyUI(prompt: string, width: number, height: numbe
   if (!res.ok) throw new Error("ComfyUI submission failed (" + res.status + "): " + (await res.text()).slice(0, 1200))
   const result = await res.json() as { prompt_id?: string; error?: string }
   if (!result.prompt_id) throw new Error("ComfyUI did not return prompt_id: " + JSON.stringify(result))
-  return scene(result.prompt_id, "pending", prompt)
+  const samplers=nodesByType(workflow,["KSampler","KSamplerAdvanced"])
+  const seed=Number(samplers[0]?.[1]?.inputs.seed)
+  const fingerprint=createHash("sha256").update(JSON.stringify(workflow)).digest("hex")
+  return {...scene(result.prompt_id, "pending", prompt),renderMeta:{
+    seed:Number.isSafeInteger(seed)?seed:null,workflowSha256:fingerprint,
+    checkpoint:process.env.COMFYUI_CHECKPOINT_NAME||"",
+    styleLoRA:process.env.COMFYUI_STYLE_LORA_NAME||""
+  }}
 }
 
 export async function pollComfyUI(promptId: string): Promise<RenderedScene> {
