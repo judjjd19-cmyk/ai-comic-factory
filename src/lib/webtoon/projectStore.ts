@@ -3,8 +3,8 @@
  * not a multi-user public database. Writes are atomic and protected by a
  * per-project filesystem lock. Model output never rewrites canonical masters.
  */
-import { mkdir, readFile, writeFile, rename, rm, stat } from 'node:fs/promises'
-import { resolve, join } from 'node:path'
+import { mkdir, readFile, writeFile, rename, rm, stat, readdir, realpath } from 'node:fs/promises'
+import { resolve, join, sep } from 'node:path'
 import { createHash, randomUUID } from 'node:crypto'
 import {
   validatePairPlan,
@@ -25,6 +25,7 @@ export interface ProjectSnapshot {
   catalog: WebtoonCatalog
   pairs: PairRecord[]
   approvedPanels: ApprovedPanel[]
+  bubbleOverrides?: Record<string, Record<string, {text:string;box:[number,number,number,number]}>>
 }
 
 type NonApprovalEvent = Exclude<PairJobEvent, 'approve_first' | 'approve_second' | 'validate'>
@@ -182,4 +183,126 @@ export class ProjectStore {
         assetId,approvedAt:new Date().toISOString(),planId:pairId})
     })
   }
+
+  async listProjects(){
+    await mkdir(this.root,{recursive:true})
+    const result:Array<{projectId:string;revision:number;characters:number;pairs:number}>=[]
+    for(const entry of await readdir(this.root,{withFileTypes:true})){
+      if(!entry.isDirectory()||!validId(entry.name))continue
+      try{
+        const item=await this.readRaw(entry.name)
+        result.push({projectId:entry.name,revision:item.revision,characters:item.catalog.characters.length,pairs:item.pairs.length})
+      }catch{}
+    }
+    return result.sort((a,b)=>a.projectId.localeCompare(b.projectId))
+  }
+  private async verifiedAsset(projectId:string,asset:ReferenceAsset):Promise<Buffer>{
+    if(!/^[a-f\d]{64}$/i.test(asset.sha256)||!/^(assets|refs)\/[a-f\d]{64}\.(png|jpg|webp)$/.test(asset.uri))
+      throw new Error('Invalid asset path or digest')
+    const root=await realpath(this.dir(projectId))
+    const file=await realpath(join(root,asset.uri))
+    if(!file.startsWith(root+sep))throw new Error('Asset path escape')
+    const bytes=await readFile(file)
+    if(hash(bytes)!==asset.sha256.toLowerCase())throw new Error('Asset file checksum mismatch')
+    return bytes
+  }
+  async readAsset(projectId:string,assetId:string){
+    assertId(assetId)
+    const asset=(await this.read(projectId)).catalog.assets.find(a=>a.id===assetId)
+    if(!asset)throw new Error('Unknown image asset')
+    const bytes=await this.verifiedAsset(projectId,asset)
+    return{asset,bytes,mime:asset.uri.endsWith('.png')?'image/png':asset.uri.endsWith('.jpg')?'image/jpeg':'image/webp'}
+  }
+  async stageMaster(projectId:string,rev:number,input:{
+    ownerId:string;kind:'identity'|'location'|'outfit'|'view';image:Buffer;
+    mime:'image/png'|'image/jpeg'|'image/webp';outfitId?:string;
+    view?:import('./contracts.ts').Facing
+  }):Promise<ProjectSnapshot>{
+    assertId(input.ownerId)
+    if(input.outfitId)assertId(input.outfitId)
+    if(!['identity','location','outfit','view'].includes(input.kind))throw new Error('Unsupported master kind')
+    const bytes=input.image
+    if(bytes.length<16||bytes.length>20*1024*1024)throw new Error('Invalid master image size')
+    const magic=input.mime==='image/png'?bytes.subarray(0,8).equals(Buffer.from([137,80,78,71,13,10,26,10])):
+      input.mime==='image/jpeg'?bytes[0]===255&&bytes[1]===216:
+      input.mime==='image/webp'?bytes.toString('ascii',0,4)==='RIFF'&&bytes.toString('ascii',8,12)==='WEBP':false
+    if(!magic)throw new Error('Wrong master image format')
+    const ext=input.mime==='image/png'?'png':input.mime==='image/jpeg'?'jpg':'webp'
+    const sha=hash(bytes)
+    const id='master_'+createHash('sha256').update(input.ownerId+input.kind+sha).digest('hex').slice(0,40)
+    return this.modify(projectId,rev,async snapshot=>{
+      if(snapshot.catalog.assets.some(a=>a.id===id))throw new Error('Master draft already exists')
+      if(input.kind==='identity'&&snapshot.catalog.characters.some(c=>c.id===input.ownerId))
+        throw new Error('Cannot overwrite approved character identity')
+      if(input.kind==='location'&&snapshot.catalog.locations.some(l=>l.id===input.ownerId))
+        throw new Error('Cannot overwrite approved location')
+      const character=snapshot.catalog.characters.find(c=>c.id===input.ownerId)
+      if((input.kind==='outfit'||input.kind==='view')&&!character)throw new Error('Unknown character')
+      const dir=join(this.dir(projectId),'refs')
+      await mkdir(dir,{recursive:true})
+      const file=join(dir,sha+'.'+ext)
+      try{await writeFile(file,bytes,{flag:'wx'})}
+      catch(e){if((e as NodeJS.ErrnoException).code!=='EEXIST')throw e}
+      if(hash(await readFile(file))!==sha)throw new Error('Master checksum mismatch')
+      snapshot.catalog.assets.push({id,kind:input.kind,ownerId:input.ownerId,uri:'refs/'+sha+'.'+ext,
+        status:'draft',version:character?.version||1,sha256:sha,
+        ...(input.outfitId?{outfitId:input.outfitId}:{}),...(input.view?{view:input.view}:{})})
+    })
+  }
+  async approveCharacter(projectId:string,rev:number,assetId:string,input:{
+    id:string;displayName:string;description:string;outfitId:string
+  }):Promise<ProjectSnapshot>{
+    assertId(input.id);assertId(input.outfitId)
+    if(!input.displayName.trim()||!input.description.trim())throw new Error('Character fields missing')
+    return this.modify(projectId,rev,async snapshot=>{
+      if(snapshot.catalog.characters.some(c=>c.id===input.id))throw new Error('Character already registered')
+      const asset=snapshot.catalog.assets.find(a=>a.id===assetId)
+      if(!asset||asset.status!=='draft'||asset.kind!=='identity'||asset.ownerId!==input.id||asset.version!==1)
+        throw new Error('An exact draft identity is required')
+      await this.verifiedAsset(projectId,asset)
+      asset.status='approved'
+      snapshot.catalog.characters.push({id:input.id,version:1,displayName:input.displayName.trim(),
+        description:input.description.trim(),outfitIds:[input.outfitId],identityReferenceId:asset.id})
+    })
+  }
+  async approveLocation(projectId:string,rev:number,assetId:string,input:{id:string;description:string}):Promise<ProjectSnapshot>{
+    assertId(input.id)
+    if(!input.description.trim())throw new Error('Location description required')
+    return this.modify(projectId,rev,async snapshot=>{
+      if(snapshot.catalog.locations.some(l=>l.id===input.id))throw new Error('Location already registered')
+      const asset=snapshot.catalog.assets.find(a=>a.id===assetId)
+      if(!asset||asset.status!=='draft'||asset.kind!=='location'||asset.ownerId!==input.id||asset.version!==1)
+        throw new Error('An exact draft location is required')
+      await this.verifiedAsset(projectId,asset)
+      asset.status='approved'
+      snapshot.catalog.locations.push({id:input.id,version:1,description:input.description.trim(),referenceIds:[asset.id]})
+    })
+  }
+  async approveSupplementalReference(projectId:string,rev:number,assetId:string):Promise<ProjectSnapshot>{
+    return this.modify(projectId,rev,async snapshot=>{
+      const asset=snapshot.catalog.assets.find(a=>a.id===assetId)
+      if(!asset||asset.status!=='draft'||!['view','outfit'].includes(asset.kind))throw new Error('Draft view/outfit required')
+      const character=snapshot.catalog.characters.find(c=>c.id===asset.ownerId)
+      if(!character||character.version!==asset.version)throw new Error('Invalid character version')
+      if(asset.kind==='outfit'&&!character.outfitIds.includes(asset.outfitId||''))throw new Error('Unknown outfit')
+      await this.verifiedAsset(projectId,asset)
+      asset.status='approved'
+    })
+  }
+  async setBubble(projectId:string,rev:number,panelId:string,bubbleId:string,text:string,
+    box:[number,number,number,number]):Promise<ProjectSnapshot>{
+    assertId(panelId);assertId(bubbleId)
+    if(!text.trim()||text.length>1200)throw new Error('Invalid dialogue')
+    if(!Array.isArray(box)||box.length!==4||box.some(n=>!Number.isFinite(n))||
+      box[0]<0||box[1]<0||box[2]<=0||box[3]<=0||box[0]+box[2]>1||box[1]+box[3]>1)
+      throw new Error('Bubble bounds invalid')
+    return this.modify(projectId,rev,snapshot=>{
+      const panel=snapshot.pairs.flatMap(p=>p.plan.panels).find(p=>p.id===panelId)
+      if(!panel||!panel.bubbles.some(b=>b.id===bubbleId))throw new Error('Unknown bubble')
+      snapshot.bubbleOverrides ||= {}
+      snapshot.bubbleOverrides[panelId] ||= {}
+      snapshot.bubbleOverrides[panelId][bubbleId]={text,box}
+    })
+  }
+
 }
