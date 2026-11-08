@@ -111,7 +111,10 @@ export default function WebtoonStudio(){
       const res=await fetch(url,{cache:'no-store'})
       const reply=await res.json() as ApiReply
       if(!res.ok||!reply.ok)throw new Error(reply.error||'Project request failed')
-      if(id)setSnapshot(reply.data as ProjectSnapshot)
+      if(id&&projectIdRef.current===id)setSnapshot(previous=>{
+        const incoming=reply.data as ProjectSnapshot
+        return previous?.projectId===id&&previous.revision>incoming.revision?previous:incoming
+      })
       else setProjects(reply.data as ProjectListItem[])
     }catch(e){setMessage(e instanceof Error?e.message:String(e))}
   },[projectId])
@@ -132,13 +135,18 @@ export default function WebtoonStudio(){
     finally{setBusy(false)}
   }
 
+  const applySnapshot=(incoming:ProjectSnapshot)=>{
+    if(projectIdRef.current && incoming.projectId!==projectIdRef.current)return
+    setSnapshot(previous=>previous?.projectId===incoming.projectId&&
+      previous.revision>incoming.revision?previous:incoming)
+  }
   const run=async(action:string,params:Record<string,unknown>={},onDone?:(data:any)=>void)=>{
     if(busy)return
     setBusy(true);setMessage(action+' 실행 중')
     try{
       const data=await request(action,{...(projectId?{projectId}:{}),...params})
-      if(data?.catalog&&data?.pairs)setSnapshot(data as ProjectSnapshot)
-      else if(data?.snapshot?.catalog)setSnapshot(data.snapshot as ProjectSnapshot)
+      if(data?.catalog&&data?.pairs)applySnapshot(data as ProjectSnapshot)
+      else if(data?.snapshot?.catalog)applySnapshot(data.snapshot as ProjectSnapshot)
       if(onDone)onDone(data)
       setMessage(action+' 완료')
       if(action==='create')await refresh('')
@@ -174,7 +182,7 @@ export default function WebtoonStudio(){
     // Serialized edits avoid overwriting one dialogue with an older response.
     bubbleQueueRef.current=bubbleQueueRef.current.catch(()=>{}).then(async()=>{
       const data=await request('editBubble',{projectId:target,panelId,bubbleId:bubble.id,text,box})
-      if(projectIdRef.current===target)setSnapshot(data)
+      if(projectIdRef.current===target)applySnapshot(data)
     }).catch(error=>{
       if(projectIdRef.current===target)
         setMessage('말풍선 저장 실패: '+(error instanceof Error?error.message:String(error)))
@@ -235,7 +243,7 @@ export default function WebtoonStudio(){
   }
   const activateDraft=async()=>{
     await run('activateDraft',{episodeId},data=>{
-      if(data.snapshot)setSnapshot(data.snapshot)
+      if(data.snapshot)applySnapshot(data.snapshot)
       setRemainingDrafts(data.remaining)
     })
   }
@@ -335,7 +343,7 @@ export default function WebtoonStudio(){
           if(disposed)return
           if(data.status==='review'){
             setPollFailed(false)
-            if(data.snapshot)setSnapshot(data.snapshot)
+            if(data.snapshot)applySnapshot(data.snapshot)
             else await refresh(projectId)
             setMessage('작화 완료. 원본·대사·인물 일치를 검수한 뒤 승인해.')
           }else if(data.status==='error'){
