@@ -74,6 +74,7 @@ export default function WebtoonStudio(){
   const [draftId,setDraftId]=useState('')
   const [generated,setGenerated]=useState('')
   const [masterPromptId,setMasterPromptId]=useState('')
+  const [masterReadyPromptId,setMasterReadyPromptId]=useState('')
   const [masterContext,setMasterContext]=useState<{
     ownerId:string;kind:'identity'|'location'|'view'|'outfit';view:string;outfitId:string
   }|null>(null)
@@ -184,23 +185,27 @@ export default function WebtoonStudio(){
     let dataUri=''
     if(generated && masterContext &&
        (masterContext.ownerId!==ownerId||masterContext.kind!==kind||
-        masterContext.view!==view||masterContext.outfitId!==outfitId)){
+        (kind==='view'&&masterContext.view!==view)||
+        ((kind==='outfit'||kind==='identity')&&masterContext.outfitId!==outfitId))){
       setMessage('생성된 원본의 캐릭터·종류가 변경됐어. 해당 원본의 설정으로 되돌리거나 다시 생성해.')
       return
     }
     try{dataUri=generated||await fileData(file as File)}
     catch(e){setMessage(e instanceof Error?e.message:String(e));return}
-    await run('stageMaster',{revision:snapshot.revision,ownerId,kind,outfitId,view,dataUri},data=>{
+    await run('stageMaster',{revision:snapshot.revision,ownerId,kind,outfitId,view,dataUri,
+      promptId:generated?masterReadyPromptId:undefined},data=>{
       const latest=data.catalog.assets.at(-1)
       if(latest)setDraftId(latest.id)
-      setReviewCheck(false)
+      setMasterReadyPromptId('');setMasterPromptId('')
+      setGenerated('');setReviewCheck(false)
     })
   }
   const approveMaster=async()=>{
     if(!snapshot||!selectedMasterDraft||!reviewCheck)return
     const action=selectedMasterDraft.kind==='identity'?'approveCharacter':selectedMasterDraft.kind==='location'?'approveLocation':'approveSupplement'
     await run(action,{revision:snapshot.revision,assetId:draftId,ownerId,displayName,
-      description,outfitId},()=>{setDraftId('');setGenerated('');setFile(null);setMasterContext(null);setMasterPromptId('');setReviewCheck(false)})
+      description,outfitId},()=>{setDraftId('');setGenerated('');setFile(null);setMasterContext(null);
+      setMasterPromptId('');setMasterReadyPromptId('');setReviewCheck(false)})
   }
   const planPair=async()=>{
     if(!snapshot)return
@@ -354,6 +359,7 @@ export default function WebtoonStudio(){
           if(cancelled)return
           if(data.status==='completed'&&data.assetUrl){
             setGenerated(data.assetUrl)
+            setMasterReadyPromptId(masterPromptId)
             setMasterPromptId('')
             setMessage('기준 이미지 초안 생성 완료. 이미지 확인 후 등록·승인해.')
           }else if(data.status==='error'){
@@ -675,21 +681,40 @@ export default function WebtoonStudio(){
               <option value="right">오른쪽</option><option value="back">후면</option></select>}
             <textarea className="border rounded p-2 w-full" placeholder="외형·장소 설명" value={description} onChange={e=>setDescription(e.target.value)} rows={3}/>
             {(kind==='identity'||kind==='outfit')&&<input className="border rounded p-2 w-full" placeholder="의상 ID" value={outfitId} onChange={e=>setOutfitId(e.target.value)}/>}
-            <input type="file" accept="image/png,image/jpeg,image/webp" onChange={e=>{setFile(e.target.files?.[0]||null);setGenerated('');setMasterContext(null);setMasterPromptId('')}}/>
+            <input type="file" accept="image/png,image/jpeg,image/webp" onChange={e=>{setFile(e.target.files?.[0]||null);setGenerated('');setMasterContext(null);
+              setMasterPromptId('');setMasterReadyPromptId('')}}/>
             <div className="flex gap-2 flex-wrap">
               <button className="border rounded px-3 py-2" disabled={busy}
-                onClick={()=>void run('generateMaster',{projectId,ownerId,kind,view,
+                onClick={()=>void run('generateMaster',{projectId,ownerId,kind,view,outfitId,
                   prompt:description,width:768,height:1024},
-                  data=>{setMasterPromptId(data.renderId);setMasterContext({ownerId,kind,view,outfitId});
+                  data=>{setMasterReadyPromptId('');setMasterPromptId(data.renderId);
+                    setMasterContext({ownerId,kind,view,outfitId});
                     setMessage('생성 작업: '+data.renderId)})}>AI로 원본 초안 생성</button>
               <button className="border rounded px-3 py-2" disabled={!masterPromptId||busy}
                 onClick={()=>void run('pollMaster',{promptId:masterPromptId},
-                  data=>{if(data.status==='completed')setGenerated(data.assetUrl);else setMessage('이미지 생성 중: '+data.status)})}>생성 결과 조회</button>
+                  data=>{if(data.status==='completed'){
+                    setGenerated(data.assetUrl);setMasterReadyPromptId(masterPromptId);setMasterPromptId('')
+                  }else setMessage('이미지 생성 중: '+data.status)})}>생성 결과 조회</button>
               <button className="border rounded px-3 py-2 bg-stone-900 text-white" disabled={busy||(!file&&!generated)}
                 onClick={()=>void stageMaster()}>이미지 초안 등록</button>
             </div>
           </div>
           <div className="space-y-2">
+            {snapshot.masterJobs?.some(job=>job.status==='pending')&&<>
+              <p className="font-medium text-sm">진행 중이던 이미지 생성 작업</p>
+              {snapshot.masterJobs.filter(job=>job.status==='pending').map(job=><button key={job.promptId}
+                disabled={busy} className="border rounded px-3 py-2 text-sm mr-2"
+                onClick={()=>{
+                  setOwnerId(job.ownerId);setKind(job.kind);setDescription(job.description)
+                  if(job.view)setView(job.view)
+                  if(job.outfitId)setOutfitId(job.outfitId)
+                  setMasterContext({ownerId:job.ownerId,kind:job.kind,
+                    view:job.view||view,outfitId:job.outfitId||outfitId})
+                  setGenerated('');setMasterReadyPromptId('');setMasterPromptId(job.promptId)
+                }}>
+                {job.kind} · {job.ownerId} 생성 작업 이어받기
+              </button>)}
+            </>}
             {generated&&<img className="h-52 object-contain border rounded" src={generated} alt="생성된 캐릭터 초안"/>}
             {snapshot.catalog.assets.some(a=>a.status==='draft'&&a.kind!=='previous-panel')&&<>
               <label className="text-xs font-medium block">저장된 기준 이미지 초안 (새로고침 후에도 재선택 가능)</label>
