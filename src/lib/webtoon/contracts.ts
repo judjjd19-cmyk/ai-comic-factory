@@ -254,17 +254,30 @@ export function selectReferences(
     if (result.length >= maxCount) throw new Error('Reference budget too small for all visible character anchors')
     add(anchor, 'identity', characterId)
   }
-  // Render continuity has priority over optional outfits/views.
+  // Identity, previous approved panel (in the same scene) and a location
+  // anchor are REQUIRED when available. Never silently lose these because a
+  // reference budget was exhausted; fail before spending GPU inference time.
   if (previous && previous.approvedAt && previous.sceneId === panel.sceneId) {
     const image = byId.get(previous.assetId)
-    if (image && image.kind === 'previous-panel' && image.ownerId === previous.id)
-      add(image, 'continuity')
+    if (!image || image.kind !== 'previous-panel' || image.ownerId !== previous.id ||
+        image.status !== 'approved' || !image.sha256)
+      throw new Error('Approved previous-panel continuity reference is missing or invalid')
+    if (result.length >= maxCount) throw new Error('Reference budget too small for approved panel continuity')
+    add(image, 'continuity')
   }
   const location = catalog.locations.find(l => l.id === panel.locationId)
-  if (location) for (const id of location.referenceIds) {
-    const asset = byId.get(id)
-    if (asset?.ownerId === location.id && asset.kind === 'location' && asset.version === location.version)
-      add(asset, 'location')
+  if (!location) throw new Error('Missing canonical location for panel')
+  const locationAssets = location.referenceIds.map(id => byId.get(id)).filter(
+    (asset): asset is ReferenceAsset => !!asset && asset.ownerId === location.id &&
+      asset.kind === 'location' && asset.version === location.version &&
+      asset.status === 'approved' && !!asset.sha256
+  )
+  if (location.referenceIds.length && !locationAssets.length)
+    throw new Error('Approved location reference is missing or invalid')
+  if (locationAssets.length) {
+    if (result.length >= maxCount) throw new Error('Reference budget too small for location continuity')
+    // The latest approved location version is authoritative for this panel.
+    add(locationAssets[locationAssets.length-1], 'location')
   }
   for (const actor of panel.characters) {
     const outfit = catalog.assets.findLast(a => a.kind === 'outfit' && a.ownerId === actor.characterId &&
