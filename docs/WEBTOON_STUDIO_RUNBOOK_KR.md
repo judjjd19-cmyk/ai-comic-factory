@@ -42,3 +42,31 @@ The basic \`comfyui/workflow-api.example.json\` is the base graph. Copy it to \`
 ## Authentication
 
 Create a strong secret with `python -c "import secrets;print(secrets.token_urlsafe(32))"` and set `WEBTOON_STUDIO_TOKEN` in `.env.local`. `/webtoon` will request this secret once and store only a signed HttpOnly session cookie. **Do not commit the secret.** The image and command endpoints refuse unauthenticated requests; a public tunnel is not enabled by this project.
+
+
+## Colab T4 초기화·실행 경로
+
+- 실행 노트북: notebooks/WEBTOON_COLAB_T4.ipynb (GitLab에서 내려받아 Colab에 업로드)
+- 설치: scripts/colab_setup.py
+- Q4 LLM/ComfyUI 전환: scripts/colab_runtime.py
+- 제작 화면: /webtoon
+
+Colab에서 Drive 마운트 후 설치:
+    python scripts/colab_setup.py --project /content/ai-comic-factory --persistent /content/drive/MyDrive/WebtoonFactory --install --download-models
+
+LLM 콘티 생성 단계:
+    python scripts/colab_runtime.py start-llm --binary /content/llama.cpp/build/bin/llama-server --model /content/drive/MyDrive/WebtoonFactory/models/downloads/Qwen3.5-9B-Q4_K_M.gguf
+
+LLM으로 회차 콘티를 저장한 뒤 이미지 단계:
+    python scripts/colab_runtime.py start-image --comfy-dir /content/ComfyUI
+
+설치 스크립트는 공개 Qwen3.5-9B Q4_K_M, Illustrious XL v2.0, IP-Adapter Plus SDXL, CLIP Vision 가중치를 내려받고 ComfyUI 경로에 심볼릭 링크한다. 모델 가중치는 GitLab 저장소에 포함하지 않는다.
+
+웹 스튜디오는 WEBTOON_STUDIO_TOKEN으로 인증한다. Colab 프록시는 브라우저 쿠키 정책에 따라 별도 탭과 iframe에서 다르게 동작할 수 있다. 인증 없는 공개 터널은 만들지 않는다.
+
+## 실제 검증 수준
+
+- Node 코어의 기존 단위 테스트와 인증 테스트를 로컬에서 실행했다.
+- 최신 브랜치 전체 TypeScript/Next 빌드, 실제 Colab T4 peak VRAM, ComfyUI 다중 인물 참조와 LoRA 적용은 아직 실측하지 않았다.
+- GitLab CI는 계정 identity verification 제한으로 실행되지 못하고 있다.
+- 기계적 시각 QA는 말풍선 기하, 이미지 크기, 빈 이미지 후보 탐지 수준이다. 얼굴·의상·행동 동일성은 승인 단계에서 육안 검수가 필요하다.
