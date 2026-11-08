@@ -15,8 +15,19 @@ export function seriesNarrativeContext(series:SeriesLedger|undefined):string{
   const relationships=series.relationships.map(r=>({
     characterIds:r.characterIds,note:r.note,updatedEpisode:r.updatedEpisode
   }))
-  return JSON.stringify({previousEpisodes:recent,unresolvedThreads:unresolved,
-    characterRelationships:relationships}).slice(0,8000)
+  let serialized=JSON.stringify({previousEpisodes:recent,unresolvedThreads:unresolved,
+    characterRelationships:relationships})
+  if(serialized.length<=12000)return serialized
+  // Preserve all open thread IDs and emit complete JSON, never silently cut a JSON object.
+  serialized=JSON.stringify({
+    previousEpisodes:recent.map(e=>({...e,summary:e.summary.slice(0,800),
+      endingHook:e.endingHook.slice(0,200),lastDialogue:e.lastDialogue.slice(0,200)})),
+    unresolvedThreads:unresolved.map(t=>({...t,description:t.description.slice(0,120)})),
+    characterRelationships:relationships.map(r=>({...r,note:r.note.slice(0,120)})),
+  })
+  if(serialized.length>18000)
+    throw Error('Canonical series context exceeds token budget; consolidate thread descriptions')
+  return serialized
 }
 export function draftEpisodeSummary(pairs:PairPlan[]):string{
   return pairs.flatMap(pair=>pair.panels.map(p=>p.summary))
