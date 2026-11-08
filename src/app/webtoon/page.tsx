@@ -185,21 +185,31 @@ export default function WebtoonStudio(){
     finally{setBusy(false)}
   }
 
-  const bubbleOverlay=(panelId:string,bubble:BubblePlan)=>{
+  const bubbleOverlay=(panelId:string,bubble:BubblePlan,editable=true)=>{
     const override=snapshot?.bubbleOverrides?.[panelId]?.[bubble.id]
     const box=override?.box||bubble.box
-    const text=override?.text||bubble.text
-    return <div key={bubble.id} className="absolute z-10 flex flex-col items-center justify-center rounded-[50%] bg-white border-2 border-stone-950 p-2 shadow-sm text-center text-stone-900"
-      style={{...boxPct(box),fontSize:'clamp(10px,1.2vw,17px)'}}>
-      {bubble.tailTarget&&<svg className="absolute z-[-1] overflow-visible pointer-events-none" style={{
-        left:0,top:0,width:'100%',height:'100%'}} viewBox="0 0 100 100" preserveAspectRatio="none">
-        <path d={`M 48 85 L ${100*(bubble.tailTarget[0]-box[0])/box[2]} ${100*(bubble.tailTarget[1]-box[1])/box[3]} L 62 88 Z`}
-          stroke="#1c1917" strokeWidth="1" fill="white"/>
+    const content=override?.text??bubble.text
+    const boxType=bubble.type==='narration'?'rounded-lg':bubble.type==='thought'?'rounded-[48%] border-dashed':'rounded-[50%]'
+    const tailPoint=bubble.tailTarget
+    const tail=tailPoint&&bubble.type!=='narration'&&
+      Number.isFinite(tailPoint[0])&&Number.isFinite(tailPoint[1])
+      ?[100*(tailPoint[0]-box[0])/box[2],100*(tailPoint[1]-box[1])/box[3]]:null
+    return <div key={bubble.id} className={'absolute z-10 flex flex-col items-center justify-center bg-white border-2 border-stone-950 p-2 shadow-sm text-center text-stone-900 '+boxType}
+      style={{...boxPct(box),fontSize:'clamp(10px,1.2vw,17px)',overflow:'visible',wordBreak:'keep-all'}}>
+      {tail&&<svg aria-hidden="true" className="absolute pointer-events-none overflow-visible"
+        style={{left:0,top:0,width:'100%',height:'100%',zIndex:-1}}
+        viewBox="0 0 100 100" preserveAspectRatio="none">
+        <path d={'M 45 82 L '+tail[0]+' '+tail[1]+' L 57 85 Z'}
+          stroke="#1c1917" strokeWidth="1.5" fill="white"/>
       </svg>}
-      <textarea key={text} defaultValue={text} aria-label={bubble.id+' 대사'} rows={2}
-        onBlur={event=>{if(event.target.value!==text)void saveBubble(panelId,bubble,event.target.value,box)}}
-        className="w-full h-full resize-none bg-transparent text-center leading-snug outline-none"/>
-      <span className="absolute -bottom-4 text-[9px] bg-white px-1 text-stone-500">{bubble.speakerId||'나레이션'}</span>
+      {editable?
+        <textarea key={content} defaultValue={content} aria-label={bubble.id+' 대사'} rows={2}
+          onBlur={event=>{if(event.target.value!==content)void saveBubble(panelId,bubble,event.target.value,box)}}
+          className="w-full h-full resize-none bg-transparent text-center leading-snug outline-none break-keep"/>:
+        <div className="w-full text-center leading-snug whitespace-pre-wrap break-keep"
+          style={{overflowWrap:'anywhere'}}>{content}</div>}
+      {editable&&<span className="absolute -bottom-4 text-[9px] bg-white px-1 text-stone-500">
+        {bubble.speakerId||'나레이션'}</span>}
     </div>
   }
   const panelCard=(pair:ProjectSnapshot['pairs'][number],idx:0|1)=>{
@@ -395,7 +405,7 @@ export default function WebtoonStudio(){
               const asset=assetForPanel(panel.id)
               return asset&&<div key={panel.id} className="w-full aspect-[3/4] relative bg-white">
                 <img src={assetUrl(projectId,asset.id)} className="absolute inset-0 w-full h-full object-cover" alt={panel.summary}/>
-                {panel.bubbles.map(b=>bubbleOverlay(panel.id,b))}
+                {panel.bubbles.map(b=>bubbleOverlay(panel.id,b,false))}
               </div>
             })}
         </div>
