@@ -59,6 +59,7 @@ export default function WebtoonStudio(){
   const [rejectReason,setRejectReason]=useState('인물 외형 또는 구도가 콘티와 다름')
   const [qaIssues,setQaIssues]=useState<Array<{severity:string;code:string;message:string}>>([])
   const stripRef=useRef<HTMLDivElement>(null)
+  const cancelPlanningRef=useRef(false)
 
   const refresh=useCallback(async(id=projectId)=>{
     try{
@@ -131,10 +132,25 @@ export default function WebtoonStudio(){
       locationId:snapshot.catalog.locations[0]?.id})
   }
   const planEpisode=async()=>{
-    if(!snapshot)return
-    await run('planEpisode',{storyGoal,episodeId,storyBibleSummary:storyBible,
-      pairCount:episodePairs,locationId:snapshot.catalog.locations[0]?.id},
-      data=>setRemainingDrafts(data.plans.length-data.cursor))
+    if(!snapshot||busy)return
+    cancelPlanningRef.current=false
+    setBusy(true)
+    try{
+      let previous=-1
+      for(let attempt=0;attempt<episodePairs&&!cancelPlanningRef.current;attempt++){
+        const data=await request('planEpisodeStep',{projectId,storyGoal,episodeId,
+          storyBibleSummary:storyBible,pairCount:episodePairs,
+          locationId:snapshot.catalog.locations[0]?.id})
+        const produced=data.plans.length
+        if(produced===previous)throw new Error('No progress during episode planning')
+        previous=produced
+        setRemainingDrafts(produced-data.cursor)
+        setMessage('회차 콘티 '+produced+'/'+episodePairs+'쌍 저장됨')
+        if(produced>=episodePairs)break
+      }
+      if(cancelPlanningRef.current)setMessage('회차 콘티 생성 중단됨. 저장된 쌍에서 이어서 재시작할 수 있음.')
+    }catch(e){setMessage('회차 계획 오류: '+String(e))}
+    finally{setBusy(false);cancelPlanningRef.current=false}
   }
   const activateDraft=async()=>{
     await run('activateDraft',{episodeId},data=>{
@@ -302,7 +318,9 @@ export default function WebtoonStudio(){
               className="ml-2 border rounded p-2 w-20"/>
           </label>
           <button className="rounded border px-4 py-2 disabled:opacity-40" disabled={busy}
-            onClick={()=>void planEpisode()}>LLM 단계: 회차 전체 2컷씩 사전 기획</button>
+            onClick={()=>void planEpisode()}>LLM: 회차 콘티 생성·중단 시 재개</button>
+          {busy&&<button className="rounded border border-amber-600 px-3 py-2 text-amber-700"
+            onClick={()=>{cancelPlanningRef.current=true}}>현재 2컷 완료 후 중단</button>}
           <button className="rounded bg-stone-900 text-white px-4 py-2 disabled:opacity-40"
             disabled={busy||(lastPair&&lastPair.job.status!=='approved')}
             onClick={()=>void activateDraft()}>이미지 단계: 저장된 다음 2컷 불러오기</button>
