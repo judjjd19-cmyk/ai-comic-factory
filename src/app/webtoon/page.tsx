@@ -54,6 +54,7 @@ export default function WebtoonStudio(){
   const [remainingDrafts,setRemainingDrafts]=useState<number|null>(null)
   const [storyBible,setStoryBible]=useState('')
   const [reviewCheck,setReviewCheck]=useState(false)
+  const [qaIssues,setQaIssues]=useState<Array<{severity:string;code:string;message:string}>>([])
   const stripRef=useRef<HTMLDivElement>(null)
 
   const refresh=useCallback(async(id=projectId)=>{
@@ -305,13 +306,20 @@ export default function WebtoonStudio(){
           {(()=>{
             const idx=lastPair.job.status==='review_first'?0:1
             const image=assetForPanel(lastPair.plan.panels[idx].id)
-            return <button className="rounded bg-stone-900 text-white px-4 py-2 disabled:opacity-40"
-              disabled={!reviewCheck||busy||!image}
-              onClick={()=>image&&void approvePanel(lastPair.plan.id,idx,image.id)}>
-              {idx+1}컷 승인
-            </button>
+            return <div className="flex gap-2 flex-wrap">
+              <button className="rounded border px-3 py-2" disabled={!image||busy}
+                onClick={()=>image&&void run('inspectPanel',{pairId:lastPair.plan.id,panelIndex:idx,assetId:image.id},
+                  data=>setQaIssues(data.issues))}>기계적 QA 검사</button>
+              <button className="rounded bg-stone-900 text-white px-4 py-2 disabled:opacity-40"
+                disabled={!reviewCheck||busy||!image}
+                onClick={()=>image&&void approvePanel(lastPair.plan.id,idx,image.id)}>{idx+1}컷 승인</button>
+            </div>
           })()}
         </>}
+        {qaIssues.length>0&&<ul className="text-xs p-3 border rounded space-y-1">
+          {qaIssues.map((x,i)=><li key={i} className={x.severity==='blocking'?'text-red-700':'text-amber-700'}>
+            {x.severity}: {x.code} · {x.message}</li>)}
+        </ul>}
         <div className="grid md:grid-cols-2 gap-4">
           {panelCard(lastPair,0)}{panelCard(lastPair,1)}
         </div>

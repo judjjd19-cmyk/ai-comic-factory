@@ -2,6 +2,7 @@ import 'server-only'
 
 import {mkdir,readFile,writeFile,rename,stat} from 'node:fs/promises'
 import sharp from 'sharp'
+import {inspectLayout} from './panelQA'
 import {resolve,join} from 'node:path'
 import {randomUUID} from 'node:crypto'
 import {ProjectStore, type ProjectSnapshot} from './projectStore'
@@ -148,7 +149,28 @@ export async function pollWebtoonPanel(projectId:string,pairId:string,panelIndex
     match[1] as 'image/png'|'image/jpeg'|'image/webp')
   return{status:'review',snapshot}
 }
+export async function inspectWebtoonPanel(projectId:string,pairId:string,panelIndex:0|1,assetId:string){
+  const snapshot=await store.read(projectId)
+  const pair=snapshot.pairs.find(p=>p.plan.id===pairId)
+  if(!pair)throw Error('Unknown pair')
+  const panel=pair.plan.panels[panelIndex]
+  const asset=snapshot.catalog.assets.find(a=>a.id===assetId)
+  if(!asset||asset.kind!=='previous-panel'||asset.ownerId!==panel.id||asset.status!=='draft')
+    throw Error('Expected the staged image for this panel')
+  const {bytes}=await store.readAsset(projectId,assetId)
+  const metadata=await sharp(bytes).metadata()
+  const issues=inspectLayout(panel,snapshot.bubbleOverrides?.[panel.id]||{})
+  if(!metadata.width||!metadata.height||metadata.width<256||metadata.height<256)
+    issues.push({severity:'blocking',code:'IMAGE_DIMENSIONS',message:'그림 해상도가 너무 작음',target:panel.id})
+  const stats=await sharp(bytes).stats()
+  if(Number.isFinite(stats.entropy)&&stats.entropy<0.08)
+    issues.push({severity:'warning',code:'NEAR_BLANK_IMAGE',message:'빈 이미지에 가까움: 육안 검토 필요',target:panel.id})
+  return {issues,width:metadata.width,height:metadata.height,manualVisualReviewRequired:true}
+}
 export async function approveWebtoonPanel(projectId:string,pairId:string,panelIndex:0|1,assetId:string,reviewer:string){
+  const report=await inspectWebtoonPanel(projectId,pairId,panelIndex,assetId)
+  const blocks=report.issues.filter(x=>x.severity==='blocking')
+  if(blocks.length)throw Error('QA blocking issues: '+blocks.map(x=>x.code).join(', '))
   const snapshot=await store.read(projectId)
   return store.approvePanel(projectId,snapshot.revision,pairId,panelIndex,assetId,reviewer)
 }
