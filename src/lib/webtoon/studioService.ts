@@ -232,13 +232,16 @@ export async function inspectWebtoonPanel(projectId:string,pairId:string,panelIn
   const stats=await sharp(bytes).stats()
   if(Number.isFinite(stats.entropy)&&stats.entropy<0.08)
     issues.push({severity:'warning',code:'NEAR_BLANK_IMAGE',message:'빈 이미지에 가까움: 육안 검토 필요',target:panel.id})
-  return {issues,width:metadata.width,height:metadata.height,manualVisualReviewRequired:true}
+  return {issues,width:metadata.width,height:metadata.height,
+    snapshotRevision:snapshot.revision,manualVisualReviewRequired:true}
 }
 export async function approveWebtoonPanel(projectId:string,pairId:string,panelIndex:0|1,assetId:string,reviewer:string){
   const report=await inspectWebtoonPanel(projectId,pairId,panelIndex,assetId)
   const blocks=report.issues.filter(x=>x.severity==='blocking')
   if(blocks.length)throw Error('QA blocking issues: '+blocks.map(x=>x.code).join(', '))
   const snapshot=await store.read(projectId)
+  if(snapshot.revision!==report.snapshotRevision)
+    throw new Error('Project changed during visual review; QA must be repeated')
   return store.approvePanel(projectId,snapshot.revision,pairId,panelIndex,assetId,reviewer)
 }
 export async function rejectWebtoonPanel(projectId:string,pairId:string,panelIndex:0|1,assetId:string,reason:string){
