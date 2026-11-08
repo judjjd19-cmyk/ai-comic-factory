@@ -25,7 +25,8 @@ const root=()=>resolve(process.env.WEBTOON_DATA_DIR||join(process.cwd(),'webtoon
 const taskPath=(projectId:string,pairId:string,panelIndex:0|1)=>
   join(root(),safeId(projectId),'tasks',safeId(pairId)+'_'+panelIndex+'.json')
 type Task={promptId:string;pairId:string;panelIndex:0|1;createdAt:string;
-  status:'submitting'|'pending'|'failed';attempt:number;width:number;height:number;error?:string}
+  status:'submitting'|'pending'|'failed';attempt:number;width:number;height:number;error?:string;
+  renderMeta?: {seed:number|null;workflowSha256:string;checkpoint:string;styleLoRA:string}}
 async function getTask(projectId:string,pairId:string,panelIndex:0|1):Promise<Task|null>{
   try{return JSON.parse(await readFile(taskPath(projectId,pairId,panelIndex),'utf8')) as Task}
   catch(e){if((e as NodeJS.ErrnoException).code==='ENOENT')return null;throw e}
@@ -174,7 +175,8 @@ export async function startWebtoonPanel(projectId:string,pairId:string,panelInde
     try{
       const scene=await renderQueuedPanel({projectId,pairId,panelIndex,width,height})
       if(scene.status!=='pending'||!scene.renderId)throw new Error('ComfyUI did not queue the render')
-      await saveTask(projectId,{...reserved,promptId:scene.renderId,status:'pending'},true)
+      await saveTask(projectId,{...reserved,promptId:scene.renderId,status:'pending',
+        ...(scene.renderMeta?{renderMeta:scene.renderMeta}:{})},true)
       return{promptId:scene.renderId,status:'pending'}
     }catch(e){
       await saveTask(projectId,{...reserved,status:'failed',error:String(e)},true)

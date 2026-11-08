@@ -74,6 +74,7 @@ export interface RenderedScene {
   error: string
   maskUrl: string
   segments: ImageSegment[]
+  renderMeta?: {seed:number|null;workflowSha256:string;checkpoint:string;styleLoRA:string}
 }
 
 export interface ImageAnalysisRequest {

@@ -1,5 +1,5 @@
 import "server-only"
-import { randomUUID } from "node:crypto"
+import { randomUUID, createHash } from "node:crypto"
 import { readFile } from "node:fs/promises"
 import { resolve } from "node:path"
 import type { RenderedScene } from "@/types"
@@ -136,7 +136,14 @@ export async function submitComfyUI(prompt: string, width: number, height: numbe
   if (!res.ok) throw new Error("ComfyUI submission failed (" + res.status + "): " + (await res.text()).slice(0, 1200))
   const result = await res.json() as { prompt_id?: string; error?: string }
   if (!result.prompt_id) throw new Error("ComfyUI did not return prompt_id: " + JSON.stringify(result))
-  return scene(result.prompt_id, "pending", prompt)
+  const samplers=nodesByType(workflow,["KSampler","KSamplerAdvanced"])
+  const seed=Number(samplers[0]?.[1]?.inputs.seed)
+  const fingerprint=createHash("sha256").update(JSON.stringify(workflow)).digest("hex")
+  return {...scene(result.prompt_id, "pending", prompt),renderMeta:{
+    seed:Number.isSafeInteger(seed)?seed:null,workflowSha256:fingerprint,
+    checkpoint:process.env.COMFYUI_CHECKPOINT_NAME||"",
+    styleLoRA:process.env.COMFYUI_STYLE_LORA_NAME||""
+  }}
 }
 
 export async function pollComfyUI(promptId: string): Promise<RenderedScene> {
