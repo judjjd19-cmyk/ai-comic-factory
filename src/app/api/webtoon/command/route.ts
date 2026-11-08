@@ -2,7 +2,7 @@ import {requireStudioAuth,requireSameOrigin} from '@/lib/webtoon/auth'
 import {
   listWebtoonProjects,createWebtoonProject,webtoonSnapshot,stageWebtoonMaster,
   approveWebtoonCharacter,approveWebtoonLocation,approveWebtoonSupplement,
-  generateMasterImage,pollMasterImage,planWebtoonPair,startWebtoonPanel,
+  generateMasterImage,pollMasterImage,queueWebtoonMaster,planWebtoonPair,startWebtoonPanel,
   pollWebtoonPanel,approveWebtoonPanel,rejectWebtoonPanel,editWebtoonBubble,generateCharacterReference,
   planEntireWebtoonEpisode,nextPlannedWebtoonPair,savedWebtoonEpisodeDrafts,inspectWebtoonPanel,planOneWebtoonPairStep,suggestWebtoonCast,saveWebtoonStory,createWebtoonEpisodeOutline,
   finalizeWebtoonEpisode,nextWebtoonEpisodeId,migrateWebtoonLegacyEpisodes,acknowledgeWebtoonContinuity,
@@ -46,7 +46,8 @@ export async function POST(request:Request){
         data=await createWebtoonProject(projectId);break
       case 'stageMaster':
         data=await stageWebtoonMaster(projectId,rev,str(body.ownerId),
-          body.kind as 'identity'|'location'|'view'|'outfit',str(body.dataUri),str(body.outfitId)||undefined,str(body.view) as 'front'|'left'|'right'|'back');break
+          body.kind as 'identity'|'location'|'view'|'outfit',str(body.dataUri),str(body.outfitId)||undefined,
+          str(body.view) as 'front'|'left'|'right'|'back',str(body.promptId)||undefined);break
       case 'approveCharacter':
         data=await approveWebtoonCharacter(projectId,rev,assetId,{
           id:str(body.ownerId),displayName:str(body.displayName),
@@ -57,11 +58,10 @@ export async function POST(request:Request){
       case 'approveSupplement':
         data=await approveWebtoonSupplement(projectId,rev,assetId);break
       case 'generateMaster':
-        data=body.kind==='view'||body.kind==='outfit'
-          ?await generateCharacterReference(projectId,str(body.ownerId),body.kind,
-            str(body.prompt),str(body.view) as 'front'|'left'|'right'|'back',
-            number(body.width)||768,number(body.height)||1024)
-          :await generateMasterImage(str(body.prompt),number(body.width)||768,number(body.height)||1024);break
+        data=await queueWebtoonMaster(projectId,str(body.ownerId),
+          body.kind as 'identity'|'location'|'view'|'outfit',str(body.prompt),
+          str(body.outfitId)||undefined,str(body.view) as 'front'|'left'|'right'|'back',
+          number(body.width)||768,number(body.height)||1024);break
       case 'pollMaster':
         data=await pollMasterImage(str(body.promptId));break
       case 'saveStory':

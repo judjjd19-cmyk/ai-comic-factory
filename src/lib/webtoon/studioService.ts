@@ -90,12 +90,14 @@ export async function createWebtoonProject(projectId:string):Promise<ProjectSnap
 export async function listWebtoonProjects(){return store.listProjects()}
 export async function webtoonSnapshot(projectId:string){return store.read(projectId)}
 export async function stageWebtoonMaster(projectId:string,revision:number,ownerId:string,
-  kind:'identity'|'location'|'view'|'outfit',dataUri:string,outfitId?:string,view?:'front'|'left'|'right'|'back'){
+  kind:'identity'|'location'|'view'|'outfit',dataUri:string,outfitId?:string,view?:'front'|'left'|'right'|'back',promptId?:string){
   if(dataUri.length>28_000_000)throw new Error('Image exceeds upload limit')
   const match=/^data:(image\/png|image\/jpeg|image\/webp);base64,([A-Za-z0-9+/=]+)$/.exec(dataUri)
   if(!match)throw new Error('Expected a PNG, JPEG or WebP data URI')
   return store.stageMaster(projectId,revision,{ownerId,kind,mime:match[1] as 'image/png'|'image/jpeg'|'image/webp',
-    image:Buffer.from(match[2],'base64'),...(outfitId?{outfitId}:{}),...(kind==='view'&&view?{view}:{})})
+    image:Buffer.from(match[2],'base64'),
+    ...((kind==='identity'||kind==='outfit')&&outfitId?{outfitId}:{}),
+    ...(kind==='view'&&view?{view}:{}),...(promptId?{promptId}:{})})
 }
 export async function approveWebtoonCharacter(projectId:string,revision:number,assetId:string,
   details:{id:string;displayName:string;description:string;outfitId:string}){
@@ -113,6 +115,25 @@ export async function generateMasterImage(prompt:string,width=768,height=1024){
   return submitComfyUI('single character design sheet, consistent appearance, no text; '+prompt,width,height)
 }
 export async function pollMasterImage(promptId:string){return pollComfyUI(promptId)}
+/** A submitted master prompt becomes a recoverable project job before UI polling. */
+export async function queueWebtoonMaster(projectId:string,ownerId:string,
+  kind:'identity'|'location'|'view'|'outfit',description:string,
+  outfitId?:string,view:'front'|'left'|'right'|'back'='front',width=768,height=1024){
+  safeId(projectId);safeId(ownerId)
+  if(!['identity','location','view','outfit'].includes(kind))throw Error('Invalid master kind')
+  const output=(kind==='view'||kind==='outfit')
+    ?await generateCharacterReference(projectId,ownerId,kind,description,view,width,height)
+    :await generateMasterImage(description,width,height)
+  if(!output.renderId||output.status!=='pending')throw Error('ComfyUI master job was not queued')
+  const snapshot=await store.read(projectId)
+  const recorded=await store.recordMasterJob(projectId,snapshot.revision,{
+    promptId:output.renderId,ownerId,kind,description,
+    ...((kind==='identity'||kind==='outfit')&&outfitId?{outfitId}:{}),
+    ...(kind==='view'?{view}:{})
+  })
+  return{...output,snapshot:recorded}
+}
+
 /** Generate additional views/outfits from immutable approved identity, not free-running txt2img. */
 export async function generateCharacterReference(projectId:string,ownerId:string,kind:'view'|'outfit',
   description:string,view:'front'|'left'|'right'|'back'='front',width=768,height=1024){
