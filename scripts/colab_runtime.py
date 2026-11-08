@@ -118,7 +118,7 @@ def main():
         if not (directory/'main.py').is_file():
             raise FileNotFoundError('ComfyUI main.py not found')
         launch([args.python,str(directory/'main.py'),'--listen','127.0.0.1',
-                '--port','8188','--disable-auto-launch'],
+                '--port','8188','--disable-auto-launch','--lowvram','--cpu-vae'],
                'image','main.py','http://127.0.0.1:8188/system_stats',8000)
 
 if __name__=='__main__':
