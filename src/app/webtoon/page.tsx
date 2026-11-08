@@ -221,6 +221,7 @@ export default function WebtoonStudio(){
   }
   const finalizeCurrentEpisode=async()=>{
     if(!snapshot||!selectedEpisode||!episodeReady?.ready)return
+    try{
     const openThreads=openThreadsText.split('\n').map(line=>line.trim()).filter(Boolean).map(line=>{
       const divider=line.indexOf('|')
       if(divider<1)throw new Error('복선 형식: thread_id | 설명')
@@ -243,6 +244,7 @@ export default function WebtoonStudio(){
       setOpenThreadsText('');setResolveThreadsText('');setRelationshipNotesText('')
       setMessage('회차 확정. 다음 화 '+next+'를 시작할 수 있어.')
     })
+    }catch(error){setMessage(error instanceof Error?error.message:String(error))}
   }
   useEffect(()=>{
     if(!authorized||!projectId||!episodeId)return
@@ -425,12 +427,12 @@ export default function WebtoonStudio(){
       </div>
       <div className="relative w-full aspect-[3/4] bg-stone-200">
         {asset&&<img src={assetUrl(projectId,asset.id)} alt={panel.summary} className="absolute inset-0 w-full h-full object-cover"/>}
-        {asset&&panel.bubbles.slice().sort((a,b)=>a.readOrder-b.readOrder).map(b=>bubbleOverlay(panel.id,b))}
+        {asset&&panel.bubbles.slice().sort((a,b)=>a.readOrder-b.readOrder).map(b=>bubbleOverlay(panel.id,b,selectedEpisode?.status!=='completed'))}
         {!asset&&<div className="absolute inset-0 grid place-items-center text-sm text-stone-500">{panel.summary}</div>}
       </div>
       <div className="px-3 py-3 text-xs text-stone-700 space-y-2">
         <p>{panel.summary}</p>
-        {panel.bubbles.map(b=>{
+        {selectedEpisode?.status!=='completed'&&panel.bubbles.map(b=>{
           const override=snapshot?.bubbleOverrides?.[panel.id]?.[b.id]
           return <BubblePositionEditor key={b.id} bubble={b}
             initialBox={override?.box||b.box}
