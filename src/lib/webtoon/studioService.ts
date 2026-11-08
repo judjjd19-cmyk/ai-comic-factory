@@ -367,3 +367,8 @@ export async function migrateWebtoonLegacyEpisodes(projectId:string){
   const snapshot=await store.read(projectId)
   return store.migrateLegacySeries(projectId,snapshot.revision)
 }
+
+export async function acknowledgeWebtoonContinuity(projectId:string,episodeId:string,reviewer:string){
+  const snapshot=await store.read(projectId)
+  return store.acknowledgeEpisodeContinuity(projectId,snapshot.revision,episodeId,reviewer)
+}

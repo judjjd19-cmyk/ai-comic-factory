@@ -532,6 +532,14 @@ export default function WebtoonStudio(){
             <p><strong>다음 화 시작 상태:</strong> {selectedEpisode.handoff.finalState.locationId} ·
               {selectedEpisode.handoff.finalState.timeKey}</p>
           </div>}
+          {selectedEpisode.continuityReviewRequired&&<div className="rounded border border-amber-600 p-3 space-y-2">
+            <p className="text-sm text-amber-800">이전 컷의 대사가 수정되어 이후 2컷들과 서사 충돌이 없는지 검토해야 해.
+              검토를 완료하기 전에는 해당 화를 마감할 수 없어.</p>
+            <button className="border rounded px-3 py-2 text-sm" disabled={busy}
+              onClick={()=>void run('acknowledgeContinuity',{episodeId,reviewer:'local-reviewer'})}>
+              이후 컷·대사 연결 검수 완료
+            </button>
+          </div>}
           {selectedEpisode.status==='producing'&&<>
             <p className="text-xs text-stone-600">확정 조건: 모든 2컷 쌍 등록 + 각 컷 승인 + 복선·후킹 인계 내용 작성.</p>
             <p className={episodeReady?.ready?'text-green-800 text-sm':'text-amber-700 text-sm'}>

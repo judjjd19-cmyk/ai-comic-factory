@@ -5,7 +5,7 @@ import {
   generateMasterImage,pollMasterImage,planWebtoonPair,startWebtoonPanel,
   pollWebtoonPanel,approveWebtoonPanel,rejectWebtoonPanel,editWebtoonBubble,generateCharacterReference,
   planEntireWebtoonEpisode,nextPlannedWebtoonPair,savedWebtoonEpisodeDrafts,inspectWebtoonPanel,planOneWebtoonPairStep,suggestWebtoonCast,saveWebtoonStory,createWebtoonEpisodeOutline,
-  finalizeWebtoonEpisode,nextWebtoonEpisodeId,migrateWebtoonLegacyEpisodes,
+  finalizeWebtoonEpisode,nextWebtoonEpisodeId,migrateWebtoonLegacyEpisodes,acknowledgeWebtoonContinuity,
 } from '@/lib/webtoon/studioService'
 
 export const runtime='nodejs'
@@ -67,6 +67,9 @@ export async function POST(request:Request){
         data=await saveWebtoonStory(projectId,str(body.storyGoal),str(body.storyBibleSummary));break
       case 'suggestCast':
         data=await suggestWebtoonCast(str(body.storyGoal),str(body.storyBibleSummary));break
+      case 'acknowledgeContinuity':
+        data=await acknowledgeWebtoonContinuity(projectId,str(body.episodeId),
+          str(body.reviewer)||'local-reviewer');break
       case 'finalizeEpisode':
         data=await finalizeWebtoonEpisode(projectId,str(body.episodeId),{
           summary:str(body.summary),endingHook:str(body.endingHook),
