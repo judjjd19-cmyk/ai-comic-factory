@@ -30,3 +30,24 @@ test('owner and revision mismatch cannot approve',()=>run(async(store,s)=>{
  await assert.rejects(store.approveCharacter('book',s.revision,s.catalog.assets[0].id,{id:'other',displayName:'a',description:'b',outfitId:'o'}),/exact draft/i)
  await assert.rejects(store.approveCharacter('book',0,s.catalog.assets[0].id,{id:'hero',displayName:'a',description:'b',outfitId:'o'}),/Revision conflict/i)
 }))
+
+test('a persisted image-generation prompt survives reload and links to the staged draft',()=>run(async(store,s,dir)=>{
+ s=await store.recordMasterJob('book',s.revision,{
+   promptId:'generated_1234567890',ownerId:'hero',kind:'identity',
+   outfitId:'uniform',description:'검은 머리'
+ })
+ const reopened=await new ProjectStore(dir).read('book')
+ assert.equal(reopened.masterJobs[0].status,'pending')
+ assert.equal(reopened.masterJobs[0].promptId,'generated_1234567890')
+ await assert.rejects(store.stageMaster('book',s.revision,{
+   ownerId:'other',kind:'identity',outfitId:'uniform',
+   image:png,mime:'image/png',promptId:'generated_1234567890'
+ }),/job identity\/angle/)
+ assert.equal((await store.read('book')).catalog.assets.length,0)
+ s=await store.stageMaster('book',s.revision,{
+   ownerId:'hero',kind:'identity',outfitId:'uniform',
+   image:png,mime:'image/png',promptId:'generated_1234567890'
+ })
+ assert.equal(s.masterJobs[0].status,'staged')
+ assert.equal(s.catalog.assets[0].status,'draft')
+}))
