@@ -38,3 +38,7 @@ The basic \`comfyui/workflow-api.example.json\` is the base graph. Copy it to \`
 - The QA checks geometry, image dimensions and obvious empty output; they do not prove face likeness or pose correctness.
 - The previous Comic Factory UI uses its own legacy state; the new \`/webtoon\` route is a dedicated production flow.
 - Model checkpoints, LoRAs, IP-Adapter/CLIP vision weights and GitLab CI runner permissions are external dependencies, not included in this repository.
+
+## Authentication
+
+Create a strong secret with `python -c "import secrets;print(secrets.token_urlsafe(32))"` and set `WEBTOON_STUDIO_TOKEN` in `.env.local`. `/webtoon` will request this secret once and store only a signed HttpOnly session cookie. **Do not commit the secret.** The image and command endpoints refuse unauthenticated requests; a public tunnel is not enabled by this project.

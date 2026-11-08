@@ -1,12 +1,11 @@
 import {webtoonAsset} from '@/lib/webtoon/studioService'
+import {requireStudioAuth} from '@/lib/webtoon/auth'
 
 export const runtime='nodejs'
 export const dynamic='force-dynamic'
 export async function GET(request:Request){
   try{
-    const host=request.headers.get('host')||''
-    if(!/^(localhost|127\.0\.0\.1|\[::1\])(?::\d+)?$/.test(host))
-      return new Response('Local studio only',{status:403})
+    requireStudioAuth(request)
     const url=new URL(request.url)
     const projectId=url.searchParams.get('projectId')||''
     const assetId=url.searchParams.get('assetId')||''

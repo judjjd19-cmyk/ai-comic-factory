@@ -1,3 +1,4 @@
+import {requireStudioAuth,requireSameOrigin} from '@/lib/webtoon/auth'
 import {
   listWebtoonProjects,createWebtoonProject,webtoonSnapshot,stageWebtoonMaster,
   approveWebtoonCharacter,approveWebtoonLocation,approveWebtoonSupplement,
@@ -9,13 +10,7 @@ import {
 export const runtime='nodejs'
 export const dynamic='force-dynamic'
 
-/** Designed for a single-user localhost studio. Never expose without an auth layer. */
-function guard(request:Request){
-  const host=request.headers.get('host')||''
-  if(!/^(localhost|127\.0\.0\.1|\[::1\])(?::\d+)?$/.test(host)) {
-    throw new Error('This studio endpoint is restricted to localhost')
-  }
-}
+function guard(request:Request){requireStudioAuth(request)}
 const str=(v:unknown):string=>typeof v==='string'?v:''
 const number=(v:unknown):number=>typeof v==='number'?v:Number(v)
 const index=(v:unknown):0|1=>{
@@ -37,6 +32,7 @@ export async function GET(request:Request){
 export async function POST(request:Request){
   try{
     guard(request)
+    requireSameOrigin(request)
     if(Number(request.headers.get('content-length')||0)>28_500_000)
       return Response.json({ok:false,error:'Request too large'},{status:413})
     const body=await request.json() as Record<string,unknown>

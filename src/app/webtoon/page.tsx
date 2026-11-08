@@ -32,6 +32,8 @@ async function fileData(file:File):Promise<string>{
   })
 }
 export default function WebtoonStudio(){
+  const [authorized,setAuthorized]=useState<boolean|null>(null)
+  const [studioToken,setStudioToken]=useState('')
   const [projects,setProjects]=useState<ProjectListItem[]>([])
   const [projectId,setProjectId]=useState('')
   const [newId,setNewId]=useState('webtoon1')
@@ -68,7 +70,22 @@ export default function WebtoonStudio(){
       else setProjects(reply.data as ProjectListItem[])
     }catch(e){setMessage(e instanceof Error?e.message:String(e))}
   },[projectId])
-  useEffect(()=>{void refresh(projectId)},[projectId,refresh])
+  useEffect(()=>{
+    void fetch('/api/webtoon/auth',{cache:'no-store'})
+      .then(r=>r.json()).then(d=>setAuthorized(d.authenticated===true)).catch(()=>setAuthorized(false))
+  },[])
+  useEffect(()=>{if(authorized)void refresh(projectId)},[authorized,projectId,refresh])
+  const login=async()=>{
+    setBusy(true)
+    try{
+      const result=await fetch('/api/webtoon/auth',{method:'POST',
+        headers:{'Content-Type':'application/json'},body:JSON.stringify({token:studioToken})})
+      const data=await result.json()
+      if(!result.ok||!data.ok)throw Error(data.error||'Invalid token')
+      setAuthorized(true);setStudioToken('');setMessage('Webtoon Studio authenticated')
+    }catch(e){setMessage(e instanceof Error?e.message:String(e))}
+    finally{setBusy(false)}
+  }
 
   const run=async(action:string,params:Record<string,unknown>={},onDone?:(data:any)=>void)=>{
     if(busy)return
@@ -185,11 +202,27 @@ export default function WebtoonStudio(){
     </div>
   }
 
+  if(authorized===null)return <main className="p-8">제작 화면 인증 확인 중…</main>
+  if(!authorized)return <main className="min-h-screen bg-stone-100 p-6 flex items-center justify-center">
+    <form onSubmit={e=>{e.preventDefault();void login()}} className="bg-white rounded-xl border p-6 w-full max-w-md space-y-4">
+      <h1 className="text-xl font-bold">Webtoon Studio 인증</h1>
+      <p className="text-sm">WEBTOON_STUDIO_TOKEN 환경변수의 비밀 토큰을 입력해.</p>
+      <input aria-label="Studio secret" type="password" required autoComplete="off"
+        className="border rounded p-2 w-full" value={studioToken}
+        onChange={e=>setStudioToken(e.target.value)}/>
+      <button type="submit" disabled={busy} className="rounded bg-stone-900 text-white p-2 w-full">로그인</button>
+      <p role="alert" className="text-sm text-red-700">{message}</p>
+    </form>
+  </main>
   return <main className="min-h-screen bg-[#f5f2ec] text-stone-900 p-4 md:p-8">
     <div className="max-w-6xl mx-auto space-y-6">
       <header className="flex flex-wrap items-end justify-between gap-4">
         <div><h1 className="text-3xl font-bold">Webtoon Studio</h1><p className="text-stone-600">승인된 원본 · 연속 2컷 · 편집 가능한 대사</p></div>
-        <a href="/" className="text-sm underline">기존 Comic Factory 편집기</a>
+        <div className="flex gap-4 items-center">
+          <a href="/" className="text-sm underline">기존 Comic Factory 편집기</a>
+          <button className="text-sm underline" onClick={()=>void fetch('/api/webtoon/auth',{method:'DELETE'})
+            .then(()=>{setAuthorized(false);setSnapshot(null)})}>로그아웃</button>
+        </div>
       </header>
       <p role="status" className="rounded border bg-white px-4 py-2 text-sm">{message}</p>
       <section className="rounded-xl bg-white p-4 space-y-3">
