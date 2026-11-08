@@ -33,8 +33,8 @@ export function buildAutoIPAdapter(workflow:ComfyWorkflow,refs:UploadedReference
       const mask=masks[ref.assetId]
       if(!mask)throw Error('Missing required actor regional mask for '+ref.assetId)
       if(!/^[\w .()\/-]+\.png$/i.test(mask)||mask.includes('..'))throw Error('Unsafe mask path')
-      clone[base+'_mask']={class_type:'LoadImage',inputs:{image:mask,upload:'image'}}
-      inputs.attn_mask=[base+'_mask',1]
+      clone[base+'_mask']={class_type:'LoadImageMask',inputs:{image:mask,channel:'alpha'}}
+      inputs.attn_mask=[base+'_mask',0]
     }
     clone[base+'_adapter']={class_type:'IPAdapterAdvanced',inputs}
     model=[base+'_adapter',0]

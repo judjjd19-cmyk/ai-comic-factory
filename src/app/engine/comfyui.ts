@@ -4,8 +4,10 @@ import { readFile } from "node:fs/promises"
 import { resolve } from "node:path"
 import type { RenderedScene } from "@/types"
 import { bindReferenceNodes, type UploadedReference, type ComfyBindings } from "@/lib/webtoon/comfyReference"
+import { buildAutoIPAdapter } from '@/lib/webtoon/autoAdapter'
+import type { PanelPlan } from '@/lib/webtoon/contracts'
 
-type WorkflowReferences = { uploaded: UploadedReference[]; bindings: ComfyBindings }
+type WorkflowReferences = { uploaded: UploadedReference[]; bindings?: ComfyBindings; auto?: { panel: PanelPlan; masks:Record<string,string> } }
 
 // ComfyUI's exported API workflow is a dictionary keyed by node ID.
 type Inputs = Record<string, unknown>
@@ -109,7 +111,13 @@ export async function prepareComfyUIWorkflow(prompt: string, width: number, heig
     inputs.strength_clip = numeric(process.env.COMFYUI_STYLE_LORA_CLIP_STRENGTH, 0.8)
   }
   if (!nodesByType(workflow, ["SaveImage"]).length) throw new Error("Workflow must contain SaveImage")
-  if (references?.uploaded.length) workflow = bindReferenceNodes(workflow, references.uploaded, references.bindings)
+  if (references?.uploaded.length && references.auto) {
+    workflow = buildAutoIPAdapter(workflow,references.uploaded,references.auto.panel,references.auto.masks,
+      process.env.COMFYUI_IPADAPTER_FILE || 'ip-adapter-plus_sdxl_vit-h.safetensors',
+      process.env.COMFYUI_CLIP_VISION_FILE || 'CLIP-ViT-H-14-laion2B-s32B-b79K.safetensors')
+  } else if (references?.uploaded.length) {
+    workflow = bindReferenceNodes(workflow,references.uploaded,references.bindings||{})
+  }
   return workflow
 }
 

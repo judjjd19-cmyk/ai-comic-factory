@@ -6,6 +6,7 @@ import { ProjectStore } from '@/lib/webtoon/projectStore'
 import { selectReferences } from '@/lib/webtoon/contracts'
 import { uploadSelectedReferences, composePanelArtPrompt, type ComfyBindings } from '@/lib/webtoon/comfyReference'
 import { submitComfyUI } from './comfyui'
+import { makeActorMask,uploadActorMask } from '@/lib/webtoon/regionMasks'
 
 /**
  * Server-side entry point for an APPROVED-master, sequential two-panel job.
@@ -27,14 +28,24 @@ export async function renderQueuedPanel({ projectId, pairId, panelIndex, width, 
     : snapshot.approvedPanels.find(p=>p.planId===pairId&&p.id===pair.plan.panels[0].id)
   if(panelIndex===1&&!previous)throw new Error('Cannot render second panel before first approved')
   const selected=selectReferences(panel,snapshot.catalog,previous)
+  const projectRoot=resolve(process.env.WEBTOON_DATA_DIR||join(process.cwd(),'webtoon-data'),projectId)
+  const endpoint=process.env.COMFYUI_API_URL||'http://127.0.0.1:8188'
+  const uploaded=await uploadSelectedReferences(projectRoot,snapshot.catalog.assets,selected,endpoint)
+  const prompt=composePanelArtPrompt(panel,snapshot.catalog,stylePrompt||'clean color Korean webtoon illustration')
+  if((process.env.COMFYUI_REFERENCE_MODE||'auto')==='auto'){
+    const masks:Record<string,string>={}
+    for(const ref of uploaded){
+      if(!ref.characterId)continue
+      const actor=panel.characters.find(a=>a.characterId===ref.characterId)
+      if(!actor)throw Error('Reference does not correspond to a visible actor')
+      masks[ref.assetId]=await uploadActorMask(endpoint,await makeActorMask(width,height,actor.box))
+    }
+    return submitComfyUI(prompt,width,height,{uploaded,auto:{panel,masks}})
+  }
   const path=process.env.COMFYUI_REFERENCE_BINDINGS_PATH||'comfyui/reference-bindings.json'
   const raw=JSON.parse(await readFile(resolve(process.cwd(),path),'utf8')) as unknown
   if(!raw||typeof raw!=='object'||Array.isArray(raw))throw new Error('Invalid ComfyUI reference node bindings')
   const bindings=raw as ComfyBindings
   if(Object.values(bindings).some(value=>typeof value!=='string'))throw new Error('ComfyUI reference node IDs must be strings')
-  const projectRoot=resolve(process.env.WEBTOON_DATA_DIR||join(process.cwd(),'webtoon-data'),projectId)
-  const endpoint=process.env.COMFYUI_API_URL||'http://127.0.0.1:8188'
-  const uploaded=await uploadSelectedReferences(projectRoot,snapshot.catalog.assets,selected,endpoint)
-  const prompt=composePanelArtPrompt(panel,snapshot.catalog,stylePrompt||'clean color Korean webtoon illustration')
   return submitComfyUI(prompt,width,height,{uploaded,bindings})
 }
