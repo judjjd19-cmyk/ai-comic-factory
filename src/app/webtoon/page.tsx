@@ -274,7 +274,8 @@ export default function WebtoonStudio(){
             <input type="file" accept="image/png,image/jpeg,image/webp" onChange={e=>{setFile(e.target.files?.[0]||null);setGenerated('')}}/>
             <div className="flex gap-2 flex-wrap">
               <button className="border rounded px-3 py-2" disabled={busy}
-                onClick={()=>void run('generateMaster',{prompt:description,width:768,height:1024},
+                onClick={()=>void run('generateMaster',{projectId,ownerId,kind,view,
+                  prompt:description,width:768,height:1024},
                   data=>{setMasterPromptId(data.renderId);setMessage('생성 작업: '+data.renderId)})}>AI로 원본 초안 생성</button>
               <button className="border rounded px-3 py-2" disabled={!masterPromptId||busy}
                 onClick={()=>void run('pollMaster',{promptId:masterPromptId},
