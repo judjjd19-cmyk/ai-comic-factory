@@ -38,6 +38,8 @@ export function episodeCompletionReady(episode:EpisodeRecord|undefined,pairs:Arr
 }>,approvedPanelIds:Set<string>):{ready:boolean;reason:string}{
   if(!episode)return{ready:false,reason:'Unknown episode'}
   if(episode.status==='completed')return{ready:false,reason:'Episode is already completed'}
+  if(episode.continuityReviewRequired)
+    return{ready:false,reason:'Dialogue changes require downstream continuity review'}
   if(episode.pairIds.length!==episode.targetPairs||episode.targetPairs<1)
     return{ready:false,reason:'Not all planned pairs are present'}
   for(const pairId of episode.pairIds){
