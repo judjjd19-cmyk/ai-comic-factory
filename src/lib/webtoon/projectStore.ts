@@ -203,7 +203,9 @@ export class ProjectStore {
     if (!magic) throw new Error('Image header does not match MIME type')
     const extension = mime === 'image/png' ? 'png' : mime === 'image/jpeg' ? 'jpg' : 'webp'
     const digest = hash(image)
-    const assetId = 'render_' + createHash('sha256').update(pairId + ':' + panelIndex + ':' + digest).digest('hex').slice(0, 40)
+    const assetId = 'render_' + createHash('sha256').update(
+      pairId + ':' + panelIndex + ':' + digest + ':' + expectedRevision
+    ).digest('hex').slice(0, 40)
     return this.modify(projectId, expectedRevision, async snapshot => {
       const pair = snapshot.pairs.find(entry => entry.plan.id === pairId)
       if (!pair) throw new Error('Unknown pair')
