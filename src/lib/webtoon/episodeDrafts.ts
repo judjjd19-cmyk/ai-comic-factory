@@ -34,11 +34,13 @@ export function initialScene(catalog:WebtoonCatalog,locationId?:string):SceneSta
       facing:(i===0?'right':'left') as 'right'|'left',heldPropIds:[],emotion:'neutral'}))}
 }
 export async function generateEpisodeDrafts(input:{projectId:string;episodeId:string;storyGoal:string;
-    storyBible:string;pairCount:number;locationId?:string},llm:(messages:PlannerMessages)=>Promise<string>,
+    storyBible:string;pairCount:number;locationId?:string;maxNewPairs?:number},llm:(messages:PlannerMessages)=>Promise<string>,
     store=new ProjectStore()):Promise<EpisodeDrafts>{
   const {projectId,episodeId,storyGoal,storyBible}=input
   id(projectId);id(episodeId)
   if(!Number.isInteger(input.pairCount)||input.pairCount<1||input.pairCount>50)throw Error('Invalid pair count')
+  const step=input.maxNewPairs??input.pairCount
+  if(!Number.isInteger(step)||step<1||step>50)throw Error('Invalid planning batch size')
   if(!storyGoal.trim()||storyGoal.length>5000||storyBible.length>15000)throw Error('Invalid episode story')
   const snapshot=await store.read(projectId)
   const catalogHash=masterHash(snapshot.catalog)
@@ -51,7 +53,8 @@ export async function generateEpisodeDrafts(input:{projectId:string;episodeId:st
     draft={projectId,episodeId,catalogHash,storyGoal,storyBible,cursor:0,startIndex:snapshot.pairs.length,plans:[],updatedAt:new Date().toISOString()}
     await save(file,draft)
   }
-  for(let i=draft.plans.length;i<input.pairCount;i++){
+  const target=Math.min(input.pairCount,draft.plans.length+step)
+  for(let i=draft.plans.length;i<target;i++){
     const last=draft.plans.at(-1)||snapshot.pairs.at(-1)?.plan
     const before=last?.after||initialScene(snapshot.catalog,input.locationId)
     const pairId='pair'+String(draft.startIndex+i+1).padStart(5,'0')
